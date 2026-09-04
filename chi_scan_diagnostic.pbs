@@ -1,14 +1,14 @@
 #!/bin/bash
 #PBS -N chi_scan_diag
-#PBS -l select=1:ncpus=16:mem=192gb
-#PBS -l walltime=30:00:00
+#PBS -l select=1:ncpus=16:mem=350gb
+#PBS -l walltime=48:00:00
 #PBS -j oe
 #PBS -o pbs_chi_scan_diag.log
 
 # If your scheduler rejects the combined "select=...:mem=" chunk syntax
 # above, split it instead:
 #   #PBS -l select=1:ncpus=16
-#   #PBS -l mem=192gb
+#   #PBS -l mem=350gb
 
 cd $PBS_O_WORKDIR
 
