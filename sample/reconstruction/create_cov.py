@@ -108,6 +108,6 @@ D = 16
 seed = 0
 rho = 0.2
 
-cov = create_tree_cov(D, rho, save_dir="normal_distribution_data/cov/")
+cov = create_tree_cov(D, rho, save_dir="sample/normal_distribution_data/cov/")
 
-np.save("normal_distribution_data/cov/cov.npy", cov)
+np.save("sample/normal_distribution_data/cov/cov.npy", cov)

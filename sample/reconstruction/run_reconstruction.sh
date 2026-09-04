@@ -1,15 +1,15 @@
 #!/bin/bash
 
-mkdir normal_distribution_data
-mkdir normal_distribution_data/cov
-mkdir normal_distribution_data/before
-mkdir normal_distribution_data/after
+mkdir sample/normal_distribution_data
+mkdir sample/normal_distribution_data/cov
+mkdir sample/normal_distribution_data/before
+mkdir sample/normal_distribution_data/after
 
-python3 create_cov.py
+python sample/reconstruction/create_cov.py
 
-python3 create_MPS.py
+python sample/reconstruction/create_MPS.py
 
-ft normal_distribution_init.yml
-ft normal_distribution.yml
+ft sample/reconstruction/normal_distribution_init.yml
+ft sample/reconstruction/normal_distribution.yml
 
-python3 visualize_edges.py
+python sample/reconstruction/visualize_edges.py

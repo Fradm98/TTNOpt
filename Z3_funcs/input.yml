@@ -1,0 +1,31 @@
+system:
+    N: 8 # Number of spins
+    spin_size: '1'
+    Lx: 3
+    Ly: 3
+    shape: parallelogram
+
+    # Exchange coupling for the XXZ or XYZ model
+    model:
+        type: z3 # Choose XXZ or XYZ
+        file: Z3_data/EF_Z.dat
+
+    MF_X: -0.1
+    EF_Z: Z3_data/EF_Z.dat
+
+numerics:
+    init_tree: 2
+    opt_structure:
+        type: 0
+    initial_bond_dimension: 10
+    max_bond_dimensions: [9,20,80] # Maximum bond dimension for each repetition
+    max_num_sweeps: [5,5,2]
+    energy_convergence_threshold: 1e-11
+    entanglement_convergence_threshold: 1e-10
+    energy_degeneracy_threshold: 1e-13
+    entanglement_degeneracy_threshold: 1e-8
+
+output:
+    dir: Z3_data
+    single_site: 0
+    two_site: 0

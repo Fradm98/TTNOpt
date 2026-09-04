@@ -57,6 +57,24 @@ def hamiltonian(config: DotMap):
         print("=" * 50)
         exit()
 
+    # electric_field_Z
+    electric_field_Z_indices = None
+    electric_field_Z = None
+    if not isinstance(config.EF_Z, DotMap):
+        if Path(str(config.EF_Z)).suffix == ".dat":
+            electric_field_Z_csv = pd.read_csv(config.EF_Z, delimiter=",", header=None)
+            electric_field_Z_indices = electric_field_Z_csv.iloc[:, :2].values
+            electric_field_Z = electric_field_Z_csv.iloc[:, 2].values
+        else:
+            if isinstance(float(config.EF_Z), float):
+                electric_field_Z_indices = [i for i in range(config.N)]
+                electric_field_Z = [config.EF_Z] * config.N
+            else:
+                print("=" * 50)
+                print("⚠️  Error: EF_Z should be .dat file or float.")
+                print("=" * 50)
+                exit()
+
     # magnetic_field_X
     magnetic_field_X_indices = None
     magnetic_field_X = None
@@ -67,6 +85,8 @@ def hamiltonian(config: DotMap):
             magnetic_field_X = magnetic_field_X_csv.iloc[:, 1].values
         else:
             if isinstance(float(config.MF_X), float):
+                if isinstance(config.MF_X, str):
+                    config.MF_X = float(config.MF_X)
                 magnetic_field_X_indices = [i for i in range(config.N)]
                 magnetic_field_X = [config.MF_X] * config.N
             else:
@@ -319,6 +339,36 @@ def hamiltonian(config: DotMap):
             print("⚠️  Error: Please input three columns in model.file for XYZ model")
             print("=" * 50)
             exit()
+
+    elif config.model.type == "z3":
+        hamiltonian = Hamiltonian(
+                config.N,
+                spin_sizes,
+                config.model.type,
+                electric_field_Z_indices,
+                electric_field_Z,
+                magnetic_field_X_indices=magnetic_field_X_indices,
+                magnetic_field_X=magnetic_field_X,
+                magnetic_field_Y_indices=magnetic_field_Y_indices,
+                magnetic_field_Y=magnetic_field_Y,
+                magnetic_field_Z_indices=magnetic_field_Z_indices,
+                magnetic_field_Z=magnetic_field_Z,
+                ion_anisotropy_indices=ion_anisotropy_indices,
+                ion_anisotropy=ion_anisotropy,
+                dzyaloshinskii_moriya_X_indices=dzyaloshinskii_moriya_X_indices,
+                dzyaloshinskii_moriya_X=dzyaloshinskii_moriya_X,
+                dzyaloshinskii_moriya_Y_indices=dzyaloshinskii_moriya_Y_indices,
+                dzyaloshinskii_moriya_Y=dzyaloshinskii_moriya_Y,
+                dzyaloshinskii_moriya_Z_indices=dzyaloshinskii_moriya_Z_indices,
+                dzyaloshinskii_moriya_Z=dzyaloshinskii_moriya_Z,
+                sod_X_indices=sod_X_indices,
+                sod_X=sod_X,
+                sod_Y_indices=sod_Y_indices,
+                sod_Y=sod_Y,
+                sod_Z_indices=sod_Z_indices,
+                sod_Z=sod_Z,
+            )
+        
     else:
         print("=" * 50)
         print("⚠️  Error: Please input the correct model type (XXZ or XYZ)")

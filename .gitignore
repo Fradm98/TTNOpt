@@ -2,6 +2,7 @@ __pycache__
 test.py
 main_.py
 .DS_Store
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -180,5 +181,6 @@ sample/factorize_tensor/standard_ttn_reduction.yml
 sample/factorize_tensor/test_ttn.yml
 sample/factorize_tensor/test_ttn_reduction.yml
 sample/reconstruction/normal_distribution_data/
+sample/normal_distribution_data/
 
 .python-version

@@ -105,6 +105,58 @@ class Hamiltonian:
                 ob = Observable(i, operator_list, coef_list)
                 self.observables.append(ob)
 
+        if model == "z3":
+            for i, coef in zip(interaction_indices, interaction_coefs):
+                operator_list = []
+                coef_list = []
+                if (i[1] is None) or (np.isnan(i[1])):
+                    # Z local dual field (bottom/right boundary terms on direct lattice)
+                    operator_list.append(["V"])
+                    coef_list.append(complex(coef.strip("()"))/2)
+                    # conjugate transposed
+                    operator_list.append(["v"])
+                    coef_list.append(complex(coef.strip("()")).conjugate()/2)
+                    # get the index of the dual site
+                    i = [i[0]]
+
+                elif (i[0] is None) or (np.isnan(i[0])):
+                    # Z^dagger local dual field (top/left boundary terms on direct lattice)
+                    operator_list.append(["v"])
+                    coef_list.append(complex(coef.strip("()"))/2)
+                    # conjugate transposed
+                    operator_list.append(["V"])
+                    coef_list.append(complex(coef.strip("()")).conjugate()/2)
+                    # get the index of the dual site
+                    i = [i[1]]
+                
+                else:
+                    # ZZ^dagger interaction
+                    operator_list.append(["V", "v"])
+                    coef_list.append(complex(coef.strip("()"))/2)
+                    # conjugate transposed
+                    operator_list.append(["v", "V"])
+                    coef_list.append(complex(coef.strip("()")).conjugate()/2)
+                
+                ob = Observable(i, operator_list, coef_list)
+                self.observables.append(ob)
+
+            for idx, c in zip(magnetic_field_X_indices, magnetic_field_X):
+                operator_list = []
+                coef_list = []
+                # X local dual field (plaquette UUu or Uuu in direct lattice)
+                operator_list.append(["U"])
+                coef_list.append(c/2)
+                # X^dagger
+                operator_list.append(["u"])
+                coef_list.append(c.conjugate()/2)
+
+                ob = Observable([idx], operator_list, coef_list)
+                self.observables.append(ob)
+
+            magnetic_field_X = None
+            magnetic_field_X_indices = None
+
+        
         if magnetic_field_X is not None and magnetic_field_X_indices is not None:
             for idx, c in zip(magnetic_field_X_indices, magnetic_field_X):
                 if not c == 0.0:

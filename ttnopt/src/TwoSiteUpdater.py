@@ -269,3 +269,112 @@ class TwoSiteUpdater(TwoSiteUpdaterMixin):
         for i, e in enumerate(self.psi.edges[selected_tensor_id]):
             self.psi.edge_dims[e] = self.psi.tensors[selected_tensor_id].shape[i]
         return
+
+    def edge_path(self, start_edge_id, target_edge_id):
+        """Shortest path of edge ids from start_edge_id to target_edge_id,
+        over the same edge-adjacency graph as initial_distance() (two edges
+        are adjacent iff they touch the same tensor, either as parent/child
+        or as sibling children). Returns [start_edge_id] if they're equal.
+        """
+        if start_edge_id == target_edge_id:
+            return [start_edge_id]
+
+        adjacency_list = defaultdict(set)
+        for child1, child2, parent in self.psi.edges:
+            adjacency_list[child1].add(parent)
+            adjacency_list[parent].add(child1)
+            adjacency_list[child2].add(parent)
+            adjacency_list[parent].add(child2)
+            adjacency_list[child1].add(child2)
+            adjacency_list[child2].add(child1)
+
+        predecessor = {start_edge_id: None}
+        queue = deque([start_edge_id])
+        while queue:
+            current = queue.popleft()
+            if current == target_edge_id:
+                break
+            for neighbor in adjacency_list[current]:
+                if neighbor not in predecessor:
+                    predecessor[neighbor] = current
+                    queue.append(neighbor)
+
+        if target_edge_id not in predecessor:
+            raise ValueError(
+                f"No path found from edge {start_edge_id} to edge {target_edge_id}"
+            )
+
+        path = [target_edge_id]
+        while path[-1] != start_edge_id:
+            path.append(predecessor[path[-1]])
+        path.reverse()
+        return path
+
+    def move_canonical_center(self, target_edge_id):
+        """Move the canonical center to target_edge_id losslessly: no
+        Lanczos optimization and no truncation (max_bond_dim is already an
+        upper bound on the true rank at every cut of the current state, so
+        every SVD along the way keeps the full content).
+
+        target_edge_id must be an internal edge (the parent of exactly two
+        tensors) -- not a physical/leaf edge, since the canonical center is
+        always the parent edge of the two central tensors.
+
+        This only updates psi.tensors/psi.edges/psi.gauge_tensor/
+        psi.canonical_center_edge_id. Renormalized operators
+        (edge_spin_operators/block_hamiltonians) are stale afterwards for
+        the new center position -- callers must refresh them (e.g. via
+        PhysicsEngine._prime_renormalized_operators()).
+        """
+        path = self.edge_path(self.psi.canonical_center_edge_id, target_edge_id)
+
+        for i in range(len(path) - 1):
+            edge_id = path[i + 1]
+
+            selected_tensor_id = None
+            connected_tensor_id = None
+            for t, edge in enumerate(self.psi.edges):
+                if edge_id == edge[2]:
+                    connected_tensor_id = t
+                if edge_id in edge[:2]:
+                    selected_tensor_id = t
+
+            # absorb gauge tensor into the tensor being moved from
+            iso = tn.Node(self.psi.tensors[selected_tensor_id], backend=self.backend)
+            gauge = tn.Node(self.psi.gauge_tensor, backend=self.backend)
+            iso[2] ^ gauge[0]
+            iso = tn.contractors.auto(
+                [iso, gauge], output_edge_order=[iso[0], iso[1], gauge[1]]
+            )
+            self.psi.tensors[selected_tensor_id] = iso.get_tensor()
+
+            self.set_ttn_properties_at_one_tensor(edge_id, selected_tensor_id)
+
+            psi_1 = tn.Node(self.psi.tensors[selected_tensor_id], backend=self.backend)
+            psi_2 = tn.Node(self.psi.tensors[connected_tensor_id], backend=self.backend)
+            psi_1[2] ^ psi_2[2]
+            block = tn.contractors.auto(
+                [psi_1, psi_2],
+                output_edge_order=[psi_1[0], psi_1[1], psi_2[0], psi_2[1]],
+            )
+            psi_edges = (
+                self.psi.edges[selected_tensor_id][:2]
+                + self.psi.edges[connected_tensor_id][:2]
+            )
+
+            u, s, v, _, _, edge_order = self.decompose_two_tensors(
+                block, self.max_bond_dim, opt_structure=0
+            )
+
+            self.psi.tensors[selected_tensor_id] = u
+            self.psi.tensors[connected_tensor_id] = v
+            self.psi.gauge_tensor = s
+            (
+                self.psi.edges[selected_tensor_id][0],
+                self.psi.edges[selected_tensor_id][1],
+            ) = (psi_edges[edge_order[0]], psi_edges[edge_order[1]])
+            (
+                self.psi.edges[connected_tensor_id][0],
+                self.psi.edges[connected_tensor_id][1],
+            ) = (psi_edges[edge_order[2]], psi_edges[edge_order[3]])
+        return

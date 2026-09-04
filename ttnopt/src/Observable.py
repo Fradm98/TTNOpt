@@ -52,6 +52,8 @@ def spin_ind(spin_num):
     return spin_value
 
 
+omega = np.exp(1j*2*np.pi/3)
+
 def bare_spin_operator(spin, spin_num):
     spin_value = spin_ind(spin_num)  # Get both string form and numeric value
     # Check if spin_value is valid
@@ -100,6 +102,30 @@ def bare_spin_operator(spin, spin_num):
         Sm = bare_spin_operator("S-", spin_num)
         Sy = (Sp - Sm) / 2.0j
         return Sy
+
+    elif spin == "V":
+        # Construct the Sz operator
+        V = np.zeros((dim, dim), dtype=np.complex128)
+        for m in range(dim):
+            V[m, m] = omega**(dim-m)
+        return V
+    
+    elif spin == "v":
+        # Construct the Sz operator
+        V = bare_spin_operator("V", spin_num)
+        return V.conjugate().T
+
+    elif spin == "U":
+        # Construct the Sz operator
+        U = np.zeros((dim, dim), dtype=np.complex128)
+        for m in range(dim):
+            U[m, (m+1)%dim] = 1
+        return U
+    
+    elif spin == "u":
+        # Construct the Sz operator
+        U = bare_spin_operator("U", spin_num)
+        return U.conjugate().T
 
 
 def spin_dof(spin_num):

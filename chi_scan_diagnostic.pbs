@@ -1,0 +1,36 @@
+#!/bin/bash
+#PBS -N chi_scan_diag
+#PBS -l select=1:ncpus=16:mem=192gb
+#PBS -l walltime=30:00:00
+#PBS -j oe
+#PBS -o pbs_chi_scan_diag.log
+
+# If your scheduler rejects the combined "select=...:mem=" chunk syntax
+# above, split it instead:
+#   #PBS -l select=1:ncpus=16
+#   #PBS -l mem=192gb
+
+cd $PBS_O_WORKDIR
+
+# --- environment -----------------------------------------------------------
+# PBS batch jobs run in a non-interactive, non-login shell, which doesn't
+# source ~/.bashrc's conda-init block the way an interactive terminal does
+# -- so `conda activate` inside a job script is unreliable (confirmed: it
+# silently failed to put python on PATH). Sidestepping that entirely by
+# calling this env's python via its absolute path instead.
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+
+# Must match select=1:ncpus=16 above -- oversubscribing BLAS threads past the
+# cores actually granted just causes contention, not speedup.
+export OMP_NUM_THREADS=16
+export MKL_NUM_THREADS=16
+export OPENBLAS_NUM_THREADS=16
+
+echo "Job started on $(hostname) at $(date)"
+
+# -u: unbuffered, so this file is tail -f-able in real time (same as the
+# nohup workflow you were already using), not just readable after the job
+# finishes.
+"$PYTHON" -u chi_scan_diagnostic.py > ../5_Z3/logs/chi_scan_diagnostic_run.log 2>&1
+
+echo "Job finished at $(date)"

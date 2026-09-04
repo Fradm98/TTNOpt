@@ -47,6 +47,7 @@ class PhysicsEngine(TwoSiteUpdater):
         self.block_hamiltonians = self._init_block_hamiltonians()
 
         init_tensors_flag = False
+
         if (
             self.psi.tensors is None
         ):  # if there is no initial tensors, we need to generate it
@@ -68,6 +69,15 @@ class PhysicsEngine(TwoSiteUpdater):
             for k in self.hamiltonian.spin_size.keys():
                 self.psi.edge_dims[k] = spin_dof(self.hamiltonian.spin_size[k])
             self.init_tensors_by_block_hamiltonian()
+        else:
+            # Tensors are already valid (e.g. a pre-built random tree), but
+            # edge_spin_operators / block_hamiltonians still only contain
+            # entries for the physical (bare) edges at this point. Internal
+            # edges (8, 9, 10, ... in a TTN) need to be primed by walking the
+            # renormalization sequence once, otherwise the first call to
+            # _set_edge_spin()/_set_block_hamiltonian() during the sweep will
+            # KeyError on any internal edge that hasn't been visited yet.
+            self._prime_renormalized_operators()
 
     def expval_onesite(self, tensor_id, ground_state, tensor_ids):
         """Calculate the expectation values of the one-site operators.
@@ -82,7 +92,7 @@ class PhysicsEngine(TwoSiteUpdater):
         for index in indices:
             if index in self.psi.physical_edges:
                 expvals = {}
-                for operator in ["S+", "S-", "Sz"]:
+                for operator in ["S+", "S-", "Sz", "V", "v", "U", "u"]:
                     bra = bra_tensor.copy()
                     ket = ket_tensor.copy()
                     spin = tn.Node(self._spin_operator_at_edge(index, index, operator))
@@ -156,6 +166,8 @@ class PhysicsEngine(TwoSiteUpdater):
                 ["S+", "Sz"],
                 ["Sz", "S-"],
                 ["S-", "Sz"],
+                ["V", "v"],
+                ["v", "V"],
             ]:
                 bra = bra_tensor.copy()
                 ket = ket_tensor.copy()
@@ -261,6 +273,8 @@ class PhysicsEngine(TwoSiteUpdater):
                 ["S+", "Sz"],
                 ["Sz", "S-"],
                 ["S-", "Sz"],
+                ["V", "v"],
+                ["v", "V"],
             ]:
                 bra = bra_tensor.copy()
                 ket = ket_tensor.copy()
@@ -303,6 +317,89 @@ class PhysicsEngine(TwoSiteUpdater):
             key = (pair[0], pair[1]) if pair[0] < pair[1] else (pair[1], pair[0])
             two_site_expvals[key] = expvals
         return two_site_expvals
+
+    def _find_edge_parent_tensor(self, edge_id):
+        for tensor_id, edge in enumerate(self.psi.edges):
+            if edge_id in edge[:2]:
+                return tensor_id
+        return None
+
+    def _ancestor_edge_chain(self, edge_id):
+        # Walk up to the CURRENT canonical center, not psi.top_edge_id --
+        # top_edge_id is just the edge id chosen as center at construction
+        # time and goes stale the moment move_canonical_center re-roots
+        # part of the tree through it (it can even end up relabeled as a
+        # child of some tensor). canonical_center_edge_id is always kept
+        # correct by move_canonical_center/set_ttn_properties_at_one_tensor
+        # and is always the true root of the current orientation.
+        chain = [edge_id]
+        while chain[-1] != self.psi.canonical_center_edge_id:
+            tensor_id = self._find_edge_parent_tensor(chain[-1])
+            chain.append(self.psi.edges[tensor_id][2])
+        return chain
+
+    def _lowest_common_ancestor_edge(self, edge_i, edge_j):
+        chain_i = self._ancestor_edge_chain(edge_i)
+        chain_j = set(self._ancestor_edge_chain(edge_j))
+        for edge in chain_i:
+            if edge in chain_j:
+                return edge
+        raise ValueError(f"No common ancestor found for edges {edge_i}, {edge_j}")
+
+    def expval_general(self, edge_i, op_i, edge_j=None, op_j=None):
+        """Position-independent expectation value: <op_i at edge_i>
+        (one-site) or <op_i at edge_i, op_j at edge_j> (two-site, not
+        symmetrized -- op_i is applied at edge_i, op_j at edge_j).
+        edge_i/edge_j must be physical (bare) edges.
+
+        Moves self.psi's canonical center as needed (mutating psi in
+        place, via move_canonical_center) and re-primes
+        edge_spin_operators/block_hamiltonians for the new position
+        before evaluating. Reuses expval_onesite/expval_twosite/
+        expval_twosite_origin as-is -- they already support "V"/"v"/
+        "U"/"u" alongside the spin operators.
+
+        The returned value is <psi|O|psi> / <psi|psi>, explicitly
+        normalized: move_canonical_center's underlying SVD renormalizes
+        the gauge tensor to unit norm at each cut it touches (correct
+        when the state was already unit-norm, as after Lanczos in the
+        sweep loop, but not norm-preserving in general), so relying on
+        global norm being untouched by the move is not safe.
+        """
+        if edge_j is None:
+            parent_tensor_id = self._find_edge_parent_tensor(edge_i)
+            target_edge_id = self.psi.edges[parent_tensor_id][2]
+            self.move_canonical_center(target_edge_id)
+            self._prime_renormalized_operators()
+            central_tensor_ids = self.psi.central_tensor_ids()
+            ground_state = self.contract_central_tensors()
+            norm2 = np.real(inner_product(ground_state, ground_state))
+            result = self.expval_onesite(
+                parent_tensor_id, ground_state, central_tensor_ids
+            )
+            return result[edge_i][op_i] / norm2
+        else:
+            lca_edge_id = self._lowest_common_ancestor_edge(edge_i, edge_j)
+            self.move_canonical_center(lca_edge_id)
+            self._prime_renormalized_operators()
+            central_tensor_ids = self.psi.central_tensor_ids()
+            ground_state = self.contract_central_tensors()
+            norm2 = np.real(inner_product(ground_state, ground_state))
+
+            key = (min(edge_i, edge_j), max(edge_i, edge_j))
+            op_key = (op_i + op_j) if edge_i < edge_j else (op_j + op_i)
+
+            two_site_expvals = {}
+            for tensor_id in central_tensor_ids:
+                two_site_expvals.update(
+                    self.expval_twosite(tensor_id, ground_state, central_tensor_ids)
+                )
+            two_site_expvals.update(
+                self.expval_twosite_origin(
+                    two_site_expvals.keys(), ground_state, central_tensor_ids
+                )
+            )
+            return two_site_expvals[key][op_key] / norm2
 
     def lanczos(
         self,
@@ -489,6 +586,21 @@ class PhysicsEngine(TwoSiteUpdater):
 
         eigen_vectors = v
         return eigen_vectors
+
+    def _prime_renormalized_operators(self):
+        """Populate edge_spin_operators / block_hamiltonians for every
+        internal edge of the current tree, using the existing self.psi.tensors
+        as-is (no tensor reinitialization). This mirrors the loop in
+        init_tensors_by_block_hamiltonian but skips _set_psi_tensor_with_ham,
+        so it's safe to call whenever the tensors are already valid.
+        """
+        sequence = get_renormalization_sequence(
+            self.psi.edges, self.psi.canonical_center_edge_id
+        )
+        for tensor_id in sequence:
+            ham = self._get_block_hamiltonian(tensor_id)
+            self._set_edge_spin(tensor_id)
+            self._set_block_hamiltonian(tensor_id, ham)
 
     def init_tensors_by_block_hamiltonian(self):
         sequence = get_renormalization_sequence(
@@ -976,6 +1088,15 @@ class PhysicsEngine(TwoSiteUpdater):
         elif operator == "Sz2":
             op = self.edge_spin_operators[edge_id][bare_edge_id]["Sz"]
             op = np.dot(op, op)
+        elif operator == "V":
+            op = self.edge_spin_operators[edge_id][bare_edge_id]["V"]
+        elif operator == "v":
+            op = self.edge_spin_operators[edge_id][bare_edge_id]["V"].conj().T
+        elif operator == "U":
+            op = self.edge_spin_operators[edge_id][bare_edge_id]["U"]
+        elif operator == "u":
+            op = self.edge_spin_operators[edge_id][bare_edge_id]["U"].conj().T
+
         return op
 
     def _init_spin_operator(self):
@@ -985,6 +1106,8 @@ class PhysicsEngine(TwoSiteUpdater):
                 key: {
                     "S+": bare_spin_operator("S+", value),
                     "Sz": bare_spin_operator("Sz", value),
+                    "V": bare_spin_operator("V", value),
+                    "U": bare_spin_operator("U", value),
                 }
             }
         return edge_spin_operators

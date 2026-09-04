@@ -11,7 +11,9 @@ from dotmap import DotMap
 
 from ttnopt.hamiltonian import hamiltonian
 from ttnopt.src import GroundStateSearch, GroundStateSearchSparse, TreeTensorNetwork
-
+from ttnopt.src.TTNLinearOperator import patch_physics_engine
+from Z3_funcs.create_ttn import get_rnd_tree
+from Z3_funcs.hdf5_manager import save_tensor, load_tensor, tensor_exists
 
 def ground_state_search():
     parser = argparse.ArgumentParser(description="Ground state search simulation")
@@ -34,6 +36,84 @@ def ground_state_search():
             print("     Using MPS structure as the default.")
             print("=" * 50)
 
+    elif config.numerics.init_tree == 2:
+        psi = get_rnd_tree(Lx=config.system.Lx, Ly=config.system.Ly, shape=config.system.shape, path=config.output.tensors, chi=config.numerics.initial_bond_dimension)
+
+    elif config.numerics.init_tree == 3:
+        # Warm start: load a previously converged TTN as the initial state
+        # (parameter continuation across g, or a large-chi state to truncate
+        # down from) instead of building a fresh random tree.
+        init_tensor_file = config.numerics.init_tensor_file
+        init_g = float(config.numerics.init_g)
+        init_chi = int(config.numerics.init_chi)
+        precision = (
+            int(config.system.precision)
+            if not isinstance(config.system.precision, DotMap)
+            else 3
+        )
+        bound_state = (
+            config.system.bound_state
+            if not isinstance(config.system.bound_state, DotMap)
+            else None
+        )
+        R = config.system.R if not isinstance(config.system.R, DotMap) else None
+        chargesx = (
+            config.system.chargesx
+            if not isinstance(config.system.chargesx, DotMap)
+            else None
+        )
+        chargesy = (
+            config.system.chargesy
+            if not isinstance(config.system.chargesy, DotMap)
+            else None
+        )
+
+        if tensor_exists(
+            init_tensor_file,
+            config.system.shape,
+            config.system.Lx,
+            config.system.Ly,
+            bound_state,
+            R,
+            init_g,
+            precision,
+            init_chi,
+            chargesx=chargesx,
+            chargesy=chargesy,
+        ):
+            psi, _ = load_tensor(
+                init_tensor_file,
+                config.system.shape,
+                config.system.Lx,
+                config.system.Ly,
+                bound_state,
+                R,
+                init_g,
+                precision,
+                init_chi,
+                chargesx=chargesx,
+                chargesy=chargesy,
+            )
+            print(
+                f"Warm-started initial TTN from g={init_g}, chi={init_chi} "
+                f"({init_tensor_file})."
+            )
+        else:
+            print("=" * 50)
+            print(
+                f"⚠️  Warm-start checkpoint not found (g={init_g}, chi={init_chi}) "
+                f"in {init_tensor_file}."
+            )
+            print("     Falling back to random tree initialization (init_tree=2).")
+            print("=" * 50)
+            psi = get_rnd_tree(
+                Lx=config.system.Lx,
+                Ly=config.system.Ly,
+                shape=config.system.shape,
+                path=config.output.tensors,
+                chi=config.numerics.initial_bond_dimension,
+            )
+
     ham = hamiltonian(config.system)
 
     numerics = config.numerics
@@ -55,6 +135,11 @@ def ground_state_search():
         if not isinstance(config.output.two_site, DotMap)
         else False
     )
+    save_tensors = (
+            config.output.save_tensors
+            if not isinstance(config.output.save_tensors, DotMap)
+            else False
+        )
 
     u1_symmetry = True if not isinstance(numerics.U1_symmetry, DotMap) else False
 
@@ -180,6 +265,32 @@ def ground_state_search():
             numerics.entanglement_convergence_threshold
         )
 
+    verbose_sweeps = (
+        bool(numerics.verbose_sweeps)
+        if not isinstance(numerics.verbose_sweeps, DotMap)
+        else False
+    )
+
+    # Optional per-stage overrides for the two-site eigensolver's tolerance/
+    # iteration cap (see GroundStateSearch.run()'s lanczos_tol/lanczos_maxiter
+    # docstring). Each is a list the same length as max_bond_dimensions;
+    # entries left unset (None/missing) fall back to the eigensolver's own
+    # default (tight, 1e-10/300). Meant for loosening precision only on cheap
+    # warm-up stages, not the stage you actually want converged.
+    n_stages = len(numerics.max_bond_dimensions)
+    if isinstance(numerics.lanczos_tol, DotMap):
+        lanczos_tol_per_stage = [None] * n_stages
+    else:
+        lanczos_tol_per_stage = [
+            float(t) if t is not None else None for t in numerics.lanczos_tol
+        ]
+    if isinstance(numerics.lanczos_maxiter, DotMap):
+        lanczos_maxiter_per_stage = [None] * n_stages
+    else:
+        lanczos_maxiter_per_stage = [
+            int(m) if m is not None else None for m in numerics.lanczos_maxiter
+        ]
+
     if u1_symmetry:
         gss = GroundStateSearchSparse(
             psi,
@@ -211,10 +322,23 @@ def ground_state_search():
             entanglement_degeneracy_threshold=entanglement_degeneracy_threshold,
         )
 
+    patch_physics_engine(gss)
     for i, (max_bond_dim, max_num_sweep) in enumerate(
         zip(numerics.max_bond_dimensions, numerics.max_num_sweeps)
     ):
         gss.max_bond_dim = max_bond_dim
+        # verbose/lanczos_tol/lanczos_maxiter only exist on GroundStateSearch.run()
+        # (dense/LinOp path) -- GroundStateSearchSparse.run() (U1 path) has neither,
+        # so only pass them through when we're not on that path.
+        dense_only_kwargs = (
+            {}
+            if u1_symmetry
+            else {
+                "verbose": verbose_sweeps,
+                "lanczos_tol": lanczos_tol_per_stage[i],
+                "lanczos_maxiter": lanczos_maxiter_per_stage[i],
+            }
+        )
         if i == 0:
             gss.run(
                 opt_structure=opt_structure,
@@ -223,8 +347,13 @@ def ground_state_search():
                 max_num_sweep=max_num_sweep,
                 temperature=temperature,
                 tau=tau,
+                **dense_only_kwargs,
             )
-            print("Calculating the expectation values for the initial structure")
+            # capture diagnostics from the real optimization before the
+            # expval-only re-run below resets gss.convergence_history/converged
+            stage_convergence_history = list(gss.convergence_history)
+            stage_converged = gss.converged
+            # print("Calculating the expectation values for the initial structure")
             # re-run the first iteration to save the expectation values
             gss.run(
                 opt_structure=0,
@@ -240,6 +369,23 @@ def ground_state_search():
                 max_num_sweep=max_num_sweep,
                 eval_onesite_expval=save_onesite_expval,
                 eval_twosite_expval=save_twosite_expval,
+                **dense_only_kwargs,
+            )
+            stage_convergence_history = gss.convergence_history
+            stage_converged = gss.converged
+
+        if stage_convergence_history:
+            final = stage_convergence_history[-1]
+            print(
+                f"[chi={max_bond_dim}] sweeps used: {final['sweep']}/{max_num_sweep}, "
+                f"converged={stage_converged}, "
+                f"final max|dE/E|={final['max_energy_reldiff']:.3e}, "
+                f"final max|d(ee)|={final['max_ee_diff']:.3e}"
+            )
+        else:
+            print(
+                f"[chi={max_bond_dim}] no convergence check performed "
+                f"(max_num_sweep={max_num_sweep} <= 2), converged={stage_converged}"
             )
 
         nodes_list = {}
@@ -272,10 +418,15 @@ def ground_state_search():
         df["entanglement"] = [gss.entanglement[k] for k in all_keys]
         df["error"] = [gss.error[k] for k in all_keys]
 
-        path_ = path / f"run{i + 1}"
+        path_ = path / f"run_chi-{max_bond_dim}"
         os.makedirs(path_, exist_ok=True)
         df.to_csv(path_ / "basic.csv", header=True, index=None)
         np.savetxt(path_ / "graph.dat", gss.psi.edges, fmt="%d", delimiter=",")
+
+        if stage_convergence_history:
+            pd.DataFrame(stage_convergence_history).to_csv(
+                path_ / "convergence.csv", header=True, index=None
+            )
 
         if save_onesite_expval:
             df = pd.DataFrame(psi.physical_edges, columns=["site"], index=None)
@@ -300,7 +451,7 @@ def ground_state_search():
                 [gss.one_site_expval[edge_id]["Sz"] for edge_id in psi.physical_edges]
             )
 
-            path_ = path / f"run{i + 1}"
+            path_ = path / f"run_chi-{max_bond_dim}"
             os.makedirs(path_, exist_ok=True)
             df.to_csv(path_ / "single_site.csv", header=True, index=None)
 
@@ -338,8 +489,23 @@ def ground_state_search():
             df["SxSy"] = np.real((spp - spm + smp - smm) / 4.0j)
             df["SySx"] = np.real((spp + spm - smp - smm) / 4.0j)
 
-            path_ = path / f"run{i + 1}"
+            path_ = path / f"run_chi-{max_bond_dim}"
             os.makedirs(path_, exist_ok=True)
             df.to_csv(path_ / "two_site.csv", header=True, index=None)
 
+
+        if save_tensors:
+            ten_file = config.output.save_tensors + "/tensors.hdf5"
+            save_tensor(ten_file, 
+                        config.system.shape, 
+                        config.system.Lx, 
+                        config.system.Ly, 
+                        config.system.bound_state, 
+                        config.system.R, 
+                        config.system.g, 
+                        config.system.precision, 
+                        gss.max_bond_dim, 
+                        gss.psi,
+                        chargesx=config.system.chargesx,
+                        chargesy=config.system.chargesy)
     return 0

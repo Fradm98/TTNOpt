@@ -1,7 +1,7 @@
 target:
-    tensor: normal_distribution_data
+    tensor: sample/normal_distribution_data
     tensors_name: isometry
-    graph: normal_distribution_data/edges.dat
+    graph: sample/normal_distribution_data/edges.dat
 
 numerics:
     opt_structure:
@@ -10,4 +10,4 @@ numerics:
     truncation_error: 1e-8
 
 output:
-    dir: normal_distribution_data/before
+    dir: sample/normal_distribution_data/before

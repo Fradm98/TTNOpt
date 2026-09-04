@@ -1,3 +1,4 @@
+import time
 from copy import deepcopy
 from typing import Dict, Tuple
 
@@ -41,6 +42,9 @@ class GroundStateSearch(PhysicsEngine):
         self.error: Dict[int, float] = {}
         self.one_site_expval: Dict[int, Dict[str, float]] = {}
         self.two_site_expval: Dict[Tuple[int, int], Dict[str, float]] = {}
+        self.convergence_history: list = []
+        self.converged: bool = False
+        self.local_update_diagnostics: list = []
 
         super().__init__(
             psi,
@@ -50,6 +54,25 @@ class GroundStateSearch(PhysicsEngine):
             energy_degeneracy_threshold,
             entanglement_degeneracy_threshold,
         )
+
+    def _rayleigh_quotient(self, psi_tensor, central_tensor_ids):
+        """<phi|H_eff|phi> / <phi|phi> for an arbitrary two-site tensor phi
+        (not necessarily normalized or an eigenvector) at central_tensor_ids.
+
+        Uses self._apply_ham_psi, which patch_physics_engine() never
+        replaces (it only patches lanczos and _set_block_hamiltonian), so
+        this gives a consistent measure regardless of whether the LinOp
+        patch has been applied -- useful for the E_before/E_after_truncation
+        diagnostics, which want the same yardstick on both sides of a
+        Lanczos+truncation step.
+        """
+        psi_node = tn.Node(psi_tensor)
+        h_psi = self._apply_ham_psi(psi_node, central_tensor_ids)
+        flat_psi = psi_tensor.ravel()
+        flat_h_psi = h_psi.tensor.ravel()
+        numerator = np.real(np.vdot(flat_psi, flat_h_psi))
+        denominator = np.real(np.vdot(flat_psi, flat_psi))
+        return float(numerator / denominator)
 
     def run(
         self,
@@ -62,6 +85,11 @@ class GroundStateSearch(PhysicsEngine):
         eval_twosite_expval: bool = False,
         temperature: float = 0.0,
         tau: int = 0,
+        verbose: bool = False,
+        lanczos_tol: float = None,
+        lanczos_maxiter: int = None,
+        reference_edge_id: int = None,
+        diagnostic_edges: list = None,
     ):
         """Run DMRG algorithm.
 
@@ -72,7 +100,46 @@ class GroundStateSearch(PhysicsEngine):
             converged_count (int, optional): Converged count. Defaults to 1.
             eval_onesite_expval (bool): If evaluate one-site expectation value or not.
             eval_twosite_expval (bool): If evaluate two-site expectation value or not.
+            lanczos_tol (float, optional): Overrides the per-two-site eigensolver's
+                convergence tolerance for this call (only takes effect when
+                patch_physics_engine() has been applied -- the unpatched
+                PhysicsEngine.lanczos() uses different parameter names and
+                ignores this). Leave None to use the eigensolver's own default
+                (tight, 1e-10). Meant for cheaply loosening precision during
+                warm-up sweeps where the local ground state doesn't need to be
+                highly accurate yet.
+            lanczos_maxiter (int, optional): Same caveat as lanczos_tol, caps
+                the eigensolver's Lanczos/Arnoldi iteration count.
+            reference_edge_id (int, optional): Which edge's own energy trace
+                to record every sweep in convergence_history (ref_energy,
+                ref_energy_reldiff vs the same edge one sweep ago,
+                ref_truncation_error, ref_lanczos_residual) -- as opposed to
+                the worst-case-over-all-edges max_energy_reldiff/max_ee_diff,
+                which mixes edges visited at very different points in a
+                sweep's update history. Defaults to self.psi.top_edge_id,
+                which every sweep visits last (both subtrees below it are
+                guaranteed already updated this sweep by the time it's
+                reached), making it the least-stale single position to track.
+            diagnostic_edges (list, optional): Edge ids to instrument with
+                E_before -> E_Lanczos -> E_after_truncation tracking (see
+                self.local_update_diagnostics). Opt-in and meant to stay a
+                short list ("a few representative updates") -- each
+                instrumented update costs two extra H_eff matvecs via
+                _rayleigh_quotient, on top of the matvecs the eigensolver
+                itself already needs. Leave None (default) for zero extra
+                cost. Only opt_structure=0 is supported for this (matches
+                the only opt_structure value used anywhere in this project);
+                edge_order is not accounted for otherwise.
         """
+        lanczos_kwargs = {}
+        if lanczos_tol is not None:
+            lanczos_kwargs["tol"] = lanczos_tol
+        if lanczos_maxiter is not None:
+            lanczos_kwargs["max_iter"] = lanczos_maxiter
+        if reference_edge_id is None:
+            reference_edge_id = self.psi.top_edge_id
+        diagnostic_edges = set(diagnostic_edges) if diagnostic_edges else set()
+        self.local_update_diagnostics = []
         energy_at_edge: Dict[int, float] = {}
         _energy_at_edge: Dict[int, float] = {}
         ee_at_edge: Dict[int, float] = {}
@@ -83,6 +150,7 @@ class GroundStateSearch(PhysicsEngine):
 
         edges, _edges = deepcopy(self.psi.edges), deepcopy(self.psi.edges)
 
+        self.convergence_history = []
         converged_num = 0
 
         if tau == 0:
@@ -91,6 +159,10 @@ class GroundStateSearch(PhysicsEngine):
             temp = temperature * (2 ** (-sweep_num / tau))
             if converged_num > converged_count:
                 break
+
+            if verbose:
+                print(f"  sweep {sweep_num + 1}/{max_num_sweep} starting...", flush=True)
+            t_sweep_start = time.time()
 
             energy_at_edge = deepcopy(_energy_at_edge)
             ee_at_edge = deepcopy(_ee_at_edge)
@@ -106,7 +178,11 @@ class GroundStateSearch(PhysicsEngine):
                 _not_selected_tensor_id,
             ) = self.local_two_tensor()
 
-            print("Sweep count: " + str(sweep_num + 1))
+            ref_lanczos_residual_this_sweep = np.nan
+            ref_lanczos_retried_this_sweep = False
+            num_lanczos_retries_this_sweep = 0
+
+            # print("Sweep count: " + str(sweep_num + 1))
             while True:
                 edge_id = _edge_id
                 selected_tensor_id = _selected_tensor_id
@@ -128,7 +204,45 @@ class GroundStateSearch(PhysicsEngine):
                 self._set_block_hamiltonian(not_selected_tensor_id)
 
                 ground_state_order = [selected_tensor_id, connected_tensor_id]
-                ground_state, energy = self.lanczos(ground_state_order)
+
+                instrument_this_update = edge_id in diagnostic_edges
+                if instrument_this_update:
+                    pre_lanczos_1 = tn.Node(self.psi.tensors[selected_tensor_id])
+                    pre_lanczos_2 = tn.Node(self.psi.tensors[connected_tensor_id])
+                    pre_lanczos_1[2] ^ pre_lanczos_2[2]
+                    pre_lanczos_state = tn.contractors.auto(
+                        [pre_lanczos_1, pre_lanczos_2],
+                        output_edge_order=[
+                            pre_lanczos_1[0],
+                            pre_lanczos_1[1],
+                            pre_lanczos_2[0],
+                            pre_lanczos_2[1],
+                        ],
+                    ).get_tensor()
+                    e_before = self._rayleigh_quotient(pre_lanczos_state, ground_state_order)
+
+                ground_state, energy = self.lanczos(ground_state_order, **lanczos_kwargs)
+                # last_lanczos_retried is set by ttn_eigensolver (only when
+                # patch_physics_engine() has been applied) and is reset to
+                # False at the top of every ttn_eigensolver() call, so
+                # checking it right here after each edge's own lanczos()
+                # call is safe -- it can't leak a stale True from an earlier
+                # edge in this same sweep.
+                if getattr(self, "last_lanczos_retried", False):
+                    num_lanczos_retries_this_sweep += 1
+                if edge_id == reference_edge_id:
+                    # last_lanczos_residual is set by ttn_eigensolver (only
+                    # when patch_physics_engine() has been applied) and gets
+                    # overwritten on every call, so it must be captured here,
+                    # right after this edge's own lanczos() call -- reading it
+                    # at the end of the sweep would just give whichever edge
+                    # happened to be visited last, not this one.
+                    ref_lanczos_residual_this_sweep = getattr(
+                        self, "last_lanczos_residual", np.nan
+                    )
+                    ref_lanczos_retried_this_sweep = getattr(
+                        self, "last_lanczos_retried", False
+                    )
                 psi_edges = (
                     self.psi.edges[selected_tensor_id][:2]
                     + self.psi.edges[connected_tensor_id][:2]
@@ -143,6 +257,35 @@ class GroundStateSearch(PhysicsEngine):
                     epsilon=entanglement_convergence_threshold,
                     delta=self.entanglement_degeneracy_threshold,
                 )
+
+                if instrument_this_update:
+                    # Reconstruct the (possibly truncated) two-site tensor
+                    # from u/s/v and re-evaluate the same Rayleigh quotient,
+                    # to see how much of Lanczos's improvement survives the
+                    # SVD truncation back to max_bond_dim. Valid for
+                    # opt_structure=0 only, where edge_order==[0,1,2,3] so
+                    # u/v's leg order already matches ground_state_order.
+                    u_node = tn.Node(u)
+                    s_node = tn.Node(s)
+                    v_node = tn.Node(v)
+                    u_node[2] ^ s_node[0]
+                    s_node[1] ^ v_node[2]
+                    reconstructed = tn.contractors.auto(
+                        [u_node, s_node, v_node],
+                        output_edge_order=[u_node[0], u_node[1], v_node[0], v_node[1]],
+                    ).get_tensor()
+                    e_after_truncation = self._rayleigh_quotient(
+                        reconstructed, ground_state_order
+                    )
+                    self.local_update_diagnostics.append(
+                        {
+                            "sweep": sweep_num + 1,
+                            "edge_id": edge_id,
+                            "E_before": e_before,
+                            "E_lanczos": energy,
+                            "E_after_truncation": e_after_truncation,
+                        }
+                    )
 
                 self.psi.tensors[selected_tensor_id] = u
                 self.psi.tensors[connected_tensor_id] = v
@@ -164,7 +307,7 @@ class GroundStateSearch(PhysicsEngine):
 
                 self.distance = self.initial_distance()
                 _energy_at_edge[self.psi.canonical_center_edge_id] = energy
-                print(energy)
+                # print(energy)
                 ee = self.entanglement_entropy(probability)
                 _ee_at_edge[self.psi.canonical_center_edge_id] = ee
                 ee_dict = self.entanglement_entropy_at_physical_bond(
@@ -224,8 +367,13 @@ class GroundStateSearch(PhysicsEngine):
                     twosite_expval[key] = twosite_expval_dict[key]
 
             _edges = deepcopy(self.psi.edges)
+            sweep_elapsed = time.time() - t_sweep_start
 
             sweep_num += 1
+            if sweep_num <= 2:
+                if verbose:
+                    print(f"  sweep {sweep_num}/{max_num_sweep} done in {sweep_elapsed:.1f}s "
+                          f"(no diff yet, need >=3 sweeps of history)", flush=True)
             if sweep_num > 2:
                 diff_energy = [
                     np.abs(1 - _energy_at_edge[key] / energy_at_edge[key])
@@ -235,26 +383,84 @@ class GroundStateSearch(PhysicsEngine):
                     np.abs(ee_at_edge[key] - _ee_at_edge[key])
                     for key in ee_at_edge.keys()
                 ]
-                if all(
+                structure_unchanged = all(
                     [
                         set(edge[:2]) == set(_edge[:2]) and edge[2] == _edge[2]
                         for edge, _edge in zip(edges, _edges)
                     ]
-                ):
-                    if all(
+                )
+                converged_this_sweep = (
+                    structure_unchanged
+                    and all(
                         [
                             energy < energy_convergence_threshold
                             for energy in diff_energy
                         ]
-                    ) and all(
+                    )
+                    and all(
                         [ee < entanglement_convergence_threshold for ee in diff_ee]
-                    ):
-                        converged_num += 1
-        print("Converged")
+                    )
+                )
+                # Reference-edge-only trace: the SAME edge's own value this
+                # sweep vs. one sweep ago, as opposed to max_energy_reldiff/
+                # max_ee_diff above which are the worst case over ALL edges
+                # (a mix of edges visited at very different points in the
+                # sweep's update history -- see professor's diagnostic notes).
+                if (
+                    reference_edge_id in _energy_at_edge
+                    and reference_edge_id in energy_at_edge
+                    and energy_at_edge[reference_edge_id] != 0
+                ):
+                    ref_energy_reldiff = float(
+                        np.abs(
+                            1
+                            - _energy_at_edge[reference_edge_id]
+                            / energy_at_edge[reference_edge_id]
+                        )
+                    )
+                else:
+                    ref_energy_reldiff = float("nan")
+                self.convergence_history.append(
+                    {
+                        "sweep": sweep_num,
+                        "max_energy_reldiff": float(np.max(diff_energy)),
+                        "max_ee_diff": float(np.max(diff_ee)),
+                        "converged_this_sweep": converged_this_sweep,
+                        "ref_edge": reference_edge_id,
+                        "ref_energy": float(
+                            _energy_at_edge.get(reference_edge_id, float("nan"))
+                        ),
+                        "ref_energy_reldiff": ref_energy_reldiff,
+                        "ref_truncation_error": float(
+                            _error_at_edge.get(reference_edge_id, float("nan"))
+                        ),
+                        "ref_lanczos_residual": float(ref_lanczos_residual_this_sweep),
+                        "ref_lanczos_retried": bool(ref_lanczos_retried_this_sweep),
+                        "num_lanczos_retries": num_lanczos_retries_this_sweep,
+                    }
+                )
+                if verbose:
+                    rec = self.convergence_history[-1]
+                    print(
+                        f"  sweep {sweep_num}/{max_num_sweep} done in {sweep_elapsed:.1f}s: "
+                        f"max|dE/E|={rec['max_energy_reldiff']:.3e}, "
+                        f"max|d(ee)|={rec['max_ee_diff']:.3e}, "
+                        f"converged_this_sweep={converged_this_sweep} | "
+                        f"ref_edge={rec['ref_edge']}: E={rec['ref_energy']:.10f}, "
+                        f"reldiff={rec['ref_energy_reldiff']:.3e}, "
+                        f"trunc_err={rec['ref_truncation_error']:.3e}, "
+                        f"lanczos_resid={rec['ref_lanczos_residual']:.3e}, "
+                        f"ref_retried={rec['ref_lanczos_retried']}, "
+                        f"sweep_retries={rec['num_lanczos_retries']}",
+                        flush=True,
+                    )
+                if converged_this_sweep:
+                    converged_num += 1
 
         self.energy = _energy_at_edge
         self.entanglement = _ee_at_edge
         self.error = _error_at_edge
         self.one_site_expval = onesite_expval
         self.two_site_expval = twosite_expval
+        self.converged = converged_num > converged_count
         return 0

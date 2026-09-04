@@ -1,0 +1,7 @@
+name: ttn
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python
+  - pygraphviz

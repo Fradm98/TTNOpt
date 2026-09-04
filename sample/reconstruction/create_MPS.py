@@ -200,7 +200,7 @@ def save_edges_file(D):
         edges.append([str(D+idx-2), str(idx), str(D+idx-1)])
     edges.append([str(D-2), str(D-1), str(2*D-4)])
     
-    with open("normal_distribution_data/edges.dat", "w") as f:
+    with open("sample/normal_distribution_data/edges.dat", "w") as f:
         for e in edges:
             string = ",".join(e)
             f.write(string + "\n")
@@ -212,7 +212,7 @@ l = 10
 chi = 16
 
 # load covariance matrix
-cov = np.load("normal_distribution_data/cov/cov.npy")
+cov = np.load("sample/normal_distribution_data/cov/cov.npy")
 
 # create MPS that represents f(x) using TCI
 print("creating TCI_mps_tensors...")
@@ -225,6 +225,6 @@ norm = np.sqrt(oe.contract("ab,ab", S, S.conj()))
 
 save_edges_file(D)
 for i in range(len(new_mps_tensors)):
-    np.save(f"normal_distribution_data/isometry{i}.npy", new_mps_tensors[i])
-    np.save(f"normal_distribution_data/singular_values.npy", S)
-    np.save(f"normal_distribution_data/norm.npy", norm)
+    np.save(f"sample/normal_distribution_data/isometry{i}.npy", new_mps_tensors[i])
+    np.save(f"sample/normal_distribution_data/singular_values.npy", S)
+    np.save(f"sample/normal_distribution_data/norm.npy", norm)

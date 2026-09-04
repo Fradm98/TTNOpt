@@ -172,37 +172,7 @@ class TreeTensorNetwork:
 
         return cls(edges, top_edge_id=center_edge_id)
 
-    @classmethod
-    def init_random(
-        self,
-        edges: List[List[int]],
-        top_edge_id: Optional[int] = None,
-        edge_dims: Optional[dict] = None,
-        init_bond_dimension: int = 4,
-    ):
-        self.tensors = []
-        for _ in edges:
-            self.tensors.append(np.array([]))
-        sequence = get_renormalization_sequence(edges, top_edge_id)
-        for tensor_id in sequence:
-            m = (
-                self.edge_dims[edges[tensor_id][0]]
-                * self.edge_dims[edges[tensor_id][1]]
-            )
-            n = np.min([m, init_bond_dimension])
-            random_matrix = np.random.normal(0, 1, (m, n))
-            Q, _ = np.linalg.qr(random_matrix)
-            self.tensors[tensor_id] = np.reshape(
-                Q,
-                (
-                    self.edge_dims[self.edges[tensor_id][0]],
-                    self.edge_dims[self.edges[tensor_id][1]],
-                    n,
-                ),
-            )
-            self.edge_dims[self.edges[tensor_id][2]] = n
-        self.gauge_tensor = np.eye(n)
-
+    
     def visualize(self):
         """Visualize the TreeTensorNetwork."""
         g = nx.DiGraph()
@@ -304,3 +274,40 @@ class TreeTensorNetwork:
                 if parent_edge == self.canonical_center_edge_id:
                     parent_child_pairs.append([str(i), "top"])
         return parent_child_pairs
+
+class random_tree(TreeTensorNetwork):
+        
+    def init_random(
+        self,
+        edges: List[List[int]],
+        top_edge_id: Optional[int] = None,
+        edge_dims: Optional[dict] = None,
+        init_bond_dimension: int = 4,
+    ):
+        
+        self.tensors = []
+        for _ in edges:
+            self.tensors.append(np.array([]))
+        
+        sequence = get_renormalization_sequence(edges, top_edge_id)
+        
+        for tensor_id in sequence:
+            m = (
+                edge_dims[edges[tensor_id][0]]
+                * edge_dims[edges[tensor_id][1]]
+            )
+            n = np.min([m, init_bond_dimension])
+            random_matrix = np.random.normal(0, 1, (m, n))
+            Q, _ = np.linalg.qr(random_matrix)
+            self.tensors[tensor_id] = np.reshape(
+                Q,
+                (
+                    edge_dims[self.edges[tensor_id][0]],
+                    edge_dims[self.edges[tensor_id][1]],
+                    n,
+                ),
+            )
+            edge_dims[self.edges[tensor_id][2]] = n
+        self.gauge_tensor = np.eye(n)
+        return self
+
