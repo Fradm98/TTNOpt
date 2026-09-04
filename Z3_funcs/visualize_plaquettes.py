@@ -165,7 +165,7 @@ def plot_plaquettes(
     shape         : "hexagon" or "parallelogram"
     bound_state   : "meson", "baryon", or None  (None → no charges drawn)
     R, g, chi     : physical / simulation parameters
-    device        : "pc", "ngt", or "presto"
+    device        : "pc", "ngt", "presto", or "mac"
     precision     : decimal digits used in file path for g
     max_ee        : colour-scale upper bound (defaults to data max)
     min_ee        : colour-scale lower bound for log scale (data min > 0)
@@ -191,7 +191,9 @@ def plot_plaquettes(
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
 
     # ── colormap (trim the very light end) ────────────────────────────────────
     cmap_base = mpl.colormaps.get_cmap(cmap_name)
@@ -420,7 +422,9 @@ def plot_plaquette_links(
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
 
     ten_file = f"{drive_path}/tensors.hdf5"
 
@@ -589,7 +593,9 @@ def plot_lattice_links(
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
 
     ten_file = f"{drive_path}/tensors.hdf5"
 
@@ -734,7 +740,9 @@ def make_gif(
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
 
     # ── pass 1: read all CSVs and compute the global EE range ─────────────────
     N = nplaqs(Lx, Ly, shape)
@@ -879,7 +887,9 @@ def make_links_gif(
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
 
     frames = []
     for g in g_values:

@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 from Z3_funcs.create_graph_file import save_edges_file, create_ids_coeffs_file, nplaqs, get_coord_charges
 from Z3_funcs.lattice_plaquettes import label_links
+from Z3_funcs.hdf5_manager import tensor_exists
 
 ## System ##
 model_name = "z3"
@@ -84,6 +85,8 @@ elif device == "ngt":
     drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
 elif device == "presto":
     drive_path = "/home/fradm/projects/5_Z3"
+elif device == "mac":
+    drive_path = "/Users/fradm/Desktop/projects/5_Z3"
 
 
 folder = f"{drive_path}/shape_{shape}/_Lx{Lx}_Ly{Ly}"
@@ -121,12 +124,42 @@ print(f"warm_start_g: {WARM_START_G}")
 g_order = list(g_values[::-1])
 descend_chis = chis[-2::-1]  # chis reversed, excluding chi_max (already the ascend/converge target)
 
-pbar = tqdm(g_order, dynamic_ncols=True)
+# Resume support: skip any leading g's in g_order that already have a
+# completed checkpoint sitting in tensors.hdf5 from a previous, since-
+# interrupted run of this script (e.g. a crash mid-sweep) -- redoing an
+# already-converged g from scratch just to warm-start the next one wastes
+# exactly the hours a crash costs. chis[0] is the right chi to check: both
+# the cold-start (chis + descend_chis) and warm-start ([chis[-1]] +
+# descend_chis) pipelines above always end on chis[0], so its presence
+# means every stage for that g, including the final descend, completed.
+resume_start_idx = 0
 previous_g = None
+for g_raw in g_order:
+    g_check = float(-g_raw)
+    if tensor_exists(
+        init_tensor_file, shape, Lx, Ly, bound_state, R, g_check, precision,
+        chis[0], chargesx=chargesx, chargesy=chargesy,
+    ):
+        resume_start_idx += 1
+        previous_g = g_check
+    else:
+        break
+
+if resume_start_idx > 0:
+    print(
+        f"Resuming: found completed checkpoints for the first {resume_start_idx} "
+        f"g-value(s) in g_order, continuing from g_order[{resume_start_idx}:] "
+        f"(warm-starting from g={previous_g:.{precision}f})."
+    )
+
+pbar = tqdm(g_order[resume_start_idx:], dynamic_ncols=True)
 
 for idx, g_raw in enumerate(pbar):
     g = float(-g_raw)
-    use_warm_start = WARM_START_G and idx > 0
+    # previous_g (not idx) is what actually determines this -- idx restarts
+    # at 0 for whatever's left in g_order after the resume-skip above, but
+    # previous_g correctly carries over the last completed g either way.
+    use_warm_start = WARM_START_G and previous_g is not None
 
     pbar.set_description(
         f"g={g:.{precision}f} ("

@@ -31,7 +31,9 @@ def plot_observable(observable_func, Lx, Ly, shape, fixed, bound_state=None, dev
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     plt.errorbar(np.abs(gs), observable_values, yerr=np.nan_to_num(errors), fmt='-o', capsize=3)
@@ -49,7 +51,9 @@ def plot_observable_param(observable_func, Lx, Ly, shape, params, fixed, bound_s
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for param in params:
@@ -70,7 +74,9 @@ def plot_energy(Lx, Ly, shape, chi, R=1, bound_state=None, chargesx=None, charge
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     plt.errorbar(np.abs(gs), energies, yerr=np.nan_to_num(errors), fmt='-o', capsize=3)
@@ -89,7 +95,9 @@ def plot_energy_chi(Lx, Ly, shape, chis, R=1, bound_state=None, chargesx=None, c
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for chi in chis:
@@ -110,7 +118,9 @@ def plot_energy_R(Lx, Ly, shape, chi, Rs, bound_state=None, chargesx=None, charg
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for R in Rs:
@@ -131,7 +141,9 @@ def plot_static_potential(Lx, Ly, shape, chi, R=1, bound_state=None, chargesx=No
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     plt.errorbar(np.abs(gs), static_potentials, yerr=np.nan_to_num(errors), fmt='-o', capsize=3)
@@ -150,7 +162,9 @@ def plot_static_potential_chi(Lx, Ly, shape, chis, R=1, bound_state=None, charge
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for chi in chis:
@@ -171,7 +185,9 @@ def plot_static_potential_R(Lx, Ly, shape, chi, Rs, bound_state=None, chargesx=N
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for R in Rs:
@@ -193,7 +209,9 @@ def plot_discrete_string_tension(Lx, Ly, shape, chi, R, a=1, bound_state=None, c
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     plt.errorbar(np.abs(gs), string_tensions, yerr=np.nan_to_num(errors), fmt='-o', capsize=3)
@@ -211,7 +229,9 @@ def plot_discrete_string_tension_chi(Lx, Ly, shape, chis, R, a=1, bound_state=No
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for chi in chis:
@@ -232,7 +252,9 @@ def plot_discrete_string_tension_R(Lx, Ly, shape, chi, Rs, a=1, bound_state=None
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for R in Rs:
@@ -254,7 +276,9 @@ def plot_discrete_luscher_term(Lx, Ly, shape, chi, R, a=1, bound_state=None, cha
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     plt.errorbar(np.abs(gs), luscher_terms, yerr=np.nan_to_num(errors), fmt='-o', capsize=3)
@@ -272,7 +296,9 @@ def plot_discrete_luscher_term_chi(Lx, Ly, shape, chis, R, a=1, bound_state=None
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for chi in chis:
@@ -293,7 +319,9 @@ def plot_discrete_luscher_term_R(Lx, Ly, shape, chi, Rs, a=1, bound_state=None, 
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for R in Rs:
@@ -314,7 +342,9 @@ def plot_half_cut_entropy(Lx, Ly, shape, chi, R=1, bound_state=None, chargesx=No
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     plt.errorbar(np.abs(gs), entropies, yerr=np.nan_to_num(errors), fmt='-o', capsize=3)
@@ -332,7 +362,9 @@ def plot_half_cut_entropy_chi(Lx, Ly, shape, chis, R=1, bound_state=None, charge
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
     figure_path = f"{drive_path}/figures"
 
     for chi in chis:

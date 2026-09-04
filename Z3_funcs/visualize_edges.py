@@ -17,7 +17,9 @@ def plot(Lx, Ly, shape, bound_state, R, g, chi, device, precision=3,max_ee=0.015
     elif device == "ngt":
         drive_path = "/eos/user/f/fdimarca/projects/5_Z3"
     elif device == "presto":
-        drive_path = "/home/fdimarca/projects/5_Z3"
+        drive_path = "/home/fradm/projects/5_Z3"
+    elif device == "mac":
+        drive_path = "/Users/fradm/Desktop/projects/5_Z3"
 
     # settings
     edge_colormap = "GnBu"
