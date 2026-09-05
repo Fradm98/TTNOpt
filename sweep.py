@@ -1,6 +1,7 @@
 import subprocess
 import yaml
 import os
+import resource
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -8,6 +9,26 @@ from tqdm import tqdm
 from Z3_funcs.create_graph_file import save_edges_file, create_ids_coeffs_file, nplaqs, get_coord_charges
 from Z3_funcs.lattice_plaquettes import label_links
 from Z3_funcs.hdf5_manager import tensor_exists
+
+
+def count_open_fds():
+    """Portable open-fd counter for this process (no /proc needed, so this
+    works on macOS): probe every fd number up to the process's own soft
+    RLIMIT_NOFILE via fstat and count the ones that are actually valid.
+    O(ulimit) fstat calls -- negligible next to a multi-hour sweep, only
+    exists to find out whether/how fast sweep.py's own fd table fills up
+    between successive `gss` subprocess launches, diagnosing the
+    "Bad file descriptor" / init_sys_streams crash.
+    """
+    soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    count = 0
+    for fd in range(soft_limit):
+        try:
+            os.fstat(fd)
+            count += 1
+        except OSError:
+            pass
+    return count
 
 ## System ##
 model_name = "z3"
@@ -115,6 +136,7 @@ print(f"N plaquette (dual lattice): {N}, L links (direct lattice): {len(link_pla
 print(f"bound state: {bound_state}, R: {R}, parameter space:{len(g_values)}, g ext: {g_values[0]:.{precision}f}-{g_values[-1]:.{precision}f}")
 print(f"bond dimensions: {chis} (ascend {SWEEP_ASCEND}/converge {SWEEP_CONVERGE}/descend {SWEEP_DESCEND} sweeps), device: {device}")
 print(f"warm_start_g: {WARM_START_G}")
+print(f"[fd-check] open fds at script start: {count_open_fds()} (soft ulimit: {resource.getrlimit(resource.RLIMIT_NOFILE)[0]})", flush=True)
 
 # Process g in confined-phase-first order (g=-1.0, largest |g|, first) so the
 # warm-start chain is seeded from the easiest-to-converge, unambiguous region
@@ -151,6 +173,7 @@ if resume_start_idx > 0:
         f"g-value(s) in g_order, continuing from g_order[{resume_start_idx}:] "
         f"(warm-starting from g={previous_g:.{precision}f})."
     )
+print(f"[fd-check] open fds after resume-scan: {count_open_fds()}", flush=True)
 
 pbar = tqdm(g_order[resume_start_idx:], dynamic_ncols=True)
 
@@ -166,6 +189,7 @@ for idx, g_raw in enumerate(pbar):
         + (f"warm from g={previous_g:.{precision}f}" if use_warm_start else "cold start")
         + ")"
     )
+    print(f"[fd-check] open fds before g={g:.{precision}f}: {count_open_fds()}", flush=True)
 
     run_folder = f"{folder}/g_{g:.{precision}f}"
     os.makedirs(run_folder, exist_ok=True)
@@ -255,5 +279,6 @@ for idx, g_raw in enumerate(pbar):
         yaml.dump(input_dict, f, sort_keys=False)
 
     subprocess.run(["gss", inputfile], check=True)
+    print(f"[fd-check] open fds after g={g:.{precision}f}: {count_open_fds()}", flush=True)
 
     previous_g = g
