@@ -287,6 +287,7 @@ def ttn_eigensolver(
     num_eigvals: int = 1,
     max_iter: int = 300,
     tol: float = 1e-10,
+    ncv: int = None,
 ) -> tuple:
     """
     Replaces PhysicsEngine.lanczos().
@@ -302,6 +303,16 @@ def ttn_eigensolver(
     num_eigvals        : number of eigenvalues to compute (default 1)
     max_iter           : max Lanczos iterations passed to eigsh
     tol                : convergence tolerance
+    ncv                : size of the Krylov subspace (number of Lanczos
+                         vectors) passed to eigsh. None (default) lets scipy
+                         pick its own default (min(dim, max(2k+1, 20))) --
+                         same behavior as before this parameter existed.
+                         Larger ncv can resolve near-degenerate spectra more
+                         reliably (this is exactly what the
+                         ArpackNoConvergence retry below already does
+                         automatically) at the cost of more memory
+                         (ncv * dim * 16 bytes for complex128) and more work
+                         per restart.
 
     Returns
     -------
@@ -350,6 +361,7 @@ def ttn_eigensolver(
             v0=v0,
             tol=tol,
             maxiter=max_iter,
+            ncv=ncv,
         )
     except ArpackNoConvergence:
         # ARPACK's implicitly-restarted Lanczos stalled before reaching `tol`

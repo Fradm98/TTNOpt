@@ -88,6 +88,7 @@ class GroundStateSearch(PhysicsEngine):
         verbose: bool = False,
         lanczos_tol: float = None,
         lanczos_maxiter: int = None,
+        lanczos_ncv: int = None,
         reference_edge_id: int = None,
         diagnostic_edges: list = None,
     ):
@@ -110,6 +111,9 @@ class GroundStateSearch(PhysicsEngine):
                 highly accurate yet.
             lanczos_maxiter (int, optional): Same caveat as lanczos_tol, caps
                 the eigensolver's Lanczos/Arnoldi iteration count.
+            lanczos_ncv (int, optional): Same caveat as lanczos_tol, sets the
+                Krylov subspace size (number of Lanczos vectors) eigsh uses.
+                None keeps eigsh's own default sizing.
             reference_edge_id (int, optional): Which edge's own energy trace
                 to record every sweep in convergence_history (ref_energy,
                 ref_energy_reldiff vs the same edge one sweep ago,
@@ -136,6 +140,8 @@ class GroundStateSearch(PhysicsEngine):
             lanczos_kwargs["tol"] = lanczos_tol
         if lanczos_maxiter is not None:
             lanczos_kwargs["max_iter"] = lanczos_maxiter
+        if lanczos_ncv is not None:
+            lanczos_kwargs["ncv"] = lanczos_ncv
         if reference_edge_id is None:
             reference_edge_id = self.psi.top_edge_id
         diagnostic_edges = set(diagnostic_edges) if diagnostic_edges else set()
