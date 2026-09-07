@@ -18,7 +18,7 @@ last chi processed for a given g is simply chis[-1]) and continues from
 there, so a killed/restarted job doesn't redo finished work.
 
 Run from the repo root, e.g.:
-    OMP_NUM_THREADS=<n> MKL_NUM_THREADS=<n> OPENBLAS_NUM_THREADS=<n> python g_chi_scan_diagnostic.py
+    OMP_NUM_THREADS=<n> MKL_NUM_THREADS=<n> OPENBLAS_NUM_THREADS=<n> python diagnostics/g_chi_scan_diagnostic.py
 """
 
 import os, tempfile, time
@@ -135,7 +135,6 @@ for gi in range(resume_g_idx, len(g_values)):
             opt_structure=0,
             max_num_sweep=N_SWEEPS,
             verbose=True,
-            diagnostic_edges=[ref_edge],
             energy_convergence_threshold=0.0,
             entanglement_convergence_threshold=0.0,
         )
@@ -145,31 +144,15 @@ for gi in range(resume_g_idx, len(g_values)):
         save_tensor(CHECKPOINT_FILE, shape_, Lx, Ly, None, None, g, PRECISION, chi, gss.psi)
         print(f"checkpoint saved: g={g}, chi={chi} -> {CHECKPOINT_FILE}", flush=True)
 
-        all_results[g][chi] = {
-            "local_update_diagnostics": list(gss.local_update_diagnostics),
-            "convergence_history": list(gss.convergence_history),
-        }
+        all_results[g][chi] = {"convergence_history": list(gss.convergence_history)}
 
-        print(f"{'='*110}\n--- g={g}, chi={chi} reference-edge trace and local-update diagnostics ---\n{'='*110}")
+        print(f"{'='*110}\n--- g={g}, chi={chi} reference-edge trace ---\n{'='*110}")
         print(f"{'sweep':>5} {'ref_energy':>18} {'ref_energy_reldiff':>19} {'ref_trunc_err':>15} "
               f"{'ref_lanczos_resid':>18} {'ref_retried':>11} {'sweep_retries':>13}")
         for rec in all_results[g][chi]["convergence_history"]:
             print(f"{rec['sweep']:>5} {rec['ref_energy']:>18.10f} {rec['ref_energy_reldiff']:>19.6e} "
                   f"{rec['ref_truncation_error']:>15.6e} {rec['ref_lanczos_residual']:>18.6e} "
                   f"{str(rec['ref_lanczos_retried']):>11} {rec['num_lanczos_retries']:>13}")
-
-        lu_recs = all_results[g][chi]["local_update_diagnostics"]
-        if lu_recs:
-            gains = [rec["E_before"] - rec["E_lanczos"] for rec in lu_recs]
-            losses = [rec["E_after_truncation"] - rec["E_lanczos"] for rec in lu_recs]
-            print(f"local_update_diagnostics (ref_edge={ref_edge}): {len(lu_recs)} records")
-            print(f"  lanczos_gain: mean={np.mean(gains):.6e}, last={gains[-1]:.6e}")
-            print(f"  trunc_loss:   mean={np.mean(losses):.6e}, last={losses[-1]:.6e}")
-            print(f"  trunc_loss/lanczos_gain ratio: mean={np.mean(losses)/np.mean(gains):.4f}, "
-                  f"last={losses[-1]/gains[-1]:.4f}")
-        else:
-            print(f"local_update_diagnostics (ref_edge={ref_edge}): 0 records -- ref_edge was not "
-                  f"revisited this stage (unexpected; investigate before trusting this stage's data)")
         print("", flush=True)
 
     previous_g_for_warmstart = g
@@ -179,8 +162,8 @@ for gi in range(resume_g_idx, len(g_values)):
 # itself resumed from an earlier crash, collate across log files by hand for
 # the full picture (the per-stage tables above are always printed in full,
 # regardless of resume).
-def _cross_table(title, value_fn):
-    print(f"\n{'='*110}\n--- {title} ---\n{'='*110}")
+def _cross_table(title, field):
+    print(f"\n{'='*110}\n--- {title} (final sweep of each stage) ---\n{'='*110}")
     header = f"{'g':>8}" + "".join(f"{('chi='+str(c)):>14}" for c in chis)
     print(header)
     for g in g_values:
@@ -190,25 +173,15 @@ def _cross_table(title, value_fn):
             print(row)
             continue
         for chi in chis:
-            recs = all_results.get(g, {}).get(chi, {}).get("local_update_diagnostics")
-            if not recs:
+            hist = all_results.get(g, {}).get(chi, {}).get("convergence_history")
+            if not hist:
                 row += f"{'--':>14}"
                 continue
-            row += f"{value_fn(recs):>14.4e}"
+            row += f"{hist[-1][field]:>14.4e}"
         print(row)
 
-_cross_table(
-    "mean trunc_loss / lanczos_gain ratio",
-    lambda recs: np.mean([r["E_after_truncation"] - r["E_lanczos"] for r in recs])
-    / np.mean([r["E_before"] - r["E_lanczos"] for r in recs]),
-)
-_cross_table(
-    "mean lanczos_gain",
-    lambda recs: np.mean([r["E_before"] - r["E_lanczos"] for r in recs]),
-)
-_cross_table(
-    "mean trunc_loss",
-    lambda recs: np.mean([r["E_after_truncation"] - r["E_lanczos"] for r in recs]),
-)
+_cross_table("ref_energy_reldiff", "ref_energy_reldiff")
+_cross_table("ref_trunc_err", "ref_truncation_error")
+_cross_table("ref_lanczos_resid", "ref_lanczos_residual")
 
 print("\nDONE")

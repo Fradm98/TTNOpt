@@ -20,7 +20,7 @@ and any difference in outcome is attributable to the eigensolver
 configuration alone, not to warm-start history.
 
 Run from the repo root, e.g.:
-    OMP_NUM_THREADS=<n> MKL_NUM_THREADS=<n> OPENBLAS_NUM_THREADS=<n> python g_fixed_chi_eigensolver_scan.py
+    OMP_NUM_THREADS=<n> MKL_NUM_THREADS=<n> OPENBLAS_NUM_THREADS=<n> python diagnostics/g_fixed_chi_eigensolver_scan.py
 """
 
 import os

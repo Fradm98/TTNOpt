@@ -31,6 +31,6 @@ echo "Job started on $(hostname) at $(date)"
 # -u: unbuffered, so this file is tail -f-able in real time (same as the
 # nohup workflow you were already using), not just readable after the job
 # finishes.
-"$PYTHON" -u chi_scan_diagnostic.py > ../5_Z3/logs/chi_scan_diagnostic_run.log 2>&1
+"$PYTHON" -u diagnostics/chi_scan_diagnostic.py > ../5_Z3/logs/chi_scan_diagnostic_run.log 2>&1
 
 echo "Job finished at $(date)"

@@ -11,7 +11,7 @@ from Z3_funcs.create_ttn import get_rnd_tree
 from Z3_funcs.hdf5_manager import save_tensor, load_tensor, tensor_exists
 
 # Run from the repo root, e.g.:
-#   OMP_NUM_THREADS=<n> MKL_NUM_THREADS=<n> OPENBLAS_NUM_THREADS=<n> python chi_scan_diagnostic.py
+#   OMP_NUM_THREADS=<n> MKL_NUM_THREADS=<n> OPENBLAS_NUM_THREADS=<n> python diagnostics/chi_scan_diagnostic.py
 # Pick <n> to match your cluster allocation (cores per job), same convention as sweep.py.
 
 Lx, Ly, shape_ = 5, 5, "parallelogram"

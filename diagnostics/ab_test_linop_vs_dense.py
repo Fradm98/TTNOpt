@@ -23,7 +23,7 @@ confounded by, the run-to-run seed-sensitivity already observed in
 chi_scan_diagnostic.py (no seed is set there).
 
 Run from the repo root:
-    python ab_test_linop_vs_dense.py
+    python diagnostics/ab_test_linop_vs_dense.py
 """
 
 import copy
