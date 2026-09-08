@@ -25,6 +25,7 @@ Run from the repo root, e.g.:
 """
 
 import os, tempfile, csv
+import numpy as np
 
 import matplotlib
 matplotlib.use("Agg")  # headless-safe (this runs on presto, not just locally)
@@ -103,7 +104,7 @@ energies = [rec["energy"] for rec in traj]
 indices = list(range(len(traj)))
 
 fig, ax = plt.subplots(figsize=(12, 6))
-ax.plot(indices, abs(energies), "-", color="#2b6cb0", linewidth=0.8, marker=".", markersize=2)
+ax.plot(indices, np.abs(energies), "-", color="#2b6cb0", linewidth=0.8, marker=".", markersize=2)
 for b in sweep_boundaries:
     ax.axvline(b, color="red", linestyle="--", linewidth=0.6, alpha=1)
 ax.set_xlabel("cumulative superblock update index")
