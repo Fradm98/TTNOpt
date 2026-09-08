@@ -43,6 +43,7 @@ CHI = 20
 N_SWEEPS = 5
 
 OUT_DIR = "../5_Z3/results/energy_data"
+FIG_DIR = "../5_Z3/figures"
 
 N = nplaqs(Lx, Ly, shape_)
 tmpdir = tempfile.mkdtemp()
@@ -102,9 +103,9 @@ energies = [rec["energy"] for rec in traj]
 indices = list(range(len(traj)))
 
 fig, ax = plt.subplots(figsize=(12, 6))
-ax.plot(indices, energies, "-", color="#2b6cb0", linewidth=0.8, marker=".", markersize=2)
+ax.plot(indices, abs(energies), "-", color="#2b6cb0", linewidth=0.8, marker=".", markersize=2)
 for b in sweep_boundaries:
-    ax.axvline(b, color="gray", linestyle="--", linewidth=0.6, alpha=0.6)
+    ax.axvline(b, color="red", linestyle="--", linewidth=0.6, alpha=1)
 ax.set_xlabel("cumulative superblock update index")
 ax.set_ylabel("superblock Lanczos energy")
 ax.set_title(
@@ -112,9 +113,12 @@ ax.set_title(
     f"{N_SWEEPS} sweeps (tree topology fixed, opt_structure=0)"
 )
 ax.grid(alpha=0.3)
+
+ax.set_yscale('log')
+
 fig.tight_layout()
 
-png_path = os.path.join(OUT_DIR, f"superblock_energy_trajectory_{tag}.png")
+png_path = os.path.join(FIG_DIR, f"superblock_energy_trajectory_{tag}.png")
 fig.savefig(png_path, dpi=200)
 print(f"plot written to {png_path}", flush=True)
 
