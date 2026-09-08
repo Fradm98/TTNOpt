@@ -1,0 +1,25 @@
+#!/bin/bash
+#PBS -N superblock_traj_chi100
+#PBS -l select=1:ncpus=16:mem=350gb
+#PBS -l walltime=36:00:00
+#PBS -j oe
+#PBS -o pbs_superblock_traj_chi100.log
+
+cd $PBS_O_WORKDIR
+
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+
+export OMP_NUM_THREADS=16
+export MKL_NUM_THREADS=16
+export OPENBLAS_NUM_THREADS=16
+
+# Overrides CHI/TOTAL_SWEEPS in superblock_energy_trajectory.py without
+# needing a separate copy of the script for each chi.
+export TRAJ_CHI=100
+export TRAJ_TOTAL_SWEEPS=15
+
+echo "Job started on $(hostname) at $(date)"
+
+"$PYTHON" -u diagnostics/superblock_energy_trajectory.py > ../5_Z3/logs/superblock_energy_trajectory_chi100_run.log 2>&1
+
+echo "Job finished at $(date)"
