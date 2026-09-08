@@ -62,6 +62,23 @@ CHI = int(os.environ.get("TRAJ_CHI", 20))
 TOTAL_SWEEPS = int(os.environ.get("TRAJ_TOTAL_SWEEPS", 15))  # cumulative target across all invocations -- see resume support above
 PRECISION = 3
 
+# Cold-start warm-up ladder (chis strictly below the target CHI, used only
+# once, on the very first invocation -- resumed runs load straight from
+# CHECKPOINT_FILE at CHI and skip this entirely). NOT recorded: each
+# gss.run() call resets self.superblock_energy_trajectory, so these
+# stages' data is naturally discarded once the real, recorded run() call
+# happens afterward. Without this, Lanczos has to solve every one of the
+# hardest (all-virtual-leg) local eigenproblems at full target-chi
+# dimension starting from an essentially random v0 on the very first
+# sweep -- dramatically slower, and far more prone to ArpackNoConvergence
+# retries, than starting from an already-reasonable smaller-chi state, as
+# every other diagnostic script in this project already does by
+# warm-starting its chi ladder.
+WARMUP_CHIS = [10, 30, 50]
+WARMUP_SWEEPS = 2
+WARMUP_LANCZOS_TOL = 1e-6
+WARMUP_LANCZOS_MAXITER = 150
+
 OUT_DIR = "../5_Z3/results/energy_data"
 FIG_DIR = "../5_Z3/figures"
 
@@ -116,11 +133,29 @@ if remaining_sweeps > 0:
     ):
         psi, _ = load_tensor(CHECKPOINT_FILE, shape_, Lx, Ly, None, None, g, PRECISION, CHI)
         print(f"loaded tensor checkpoint from {CHECKPOINT_FILE}", flush=True)
+        gss = GroundStateSearch(psi, ham, init_bond_dim=CHI, max_bond_dim=CHI)
+        patch_physics_engine(gss)
     else:
-        psi = get_rnd_tree(Lx=Lx, Ly=Ly, shape=shape_, path=tensor_folder, chi=CHI)
+        chi_ladder = [c for c in WARMUP_CHIS if c < CHI] + [CHI]
+        psi = get_rnd_tree(Lx=Lx, Ly=Ly, shape=shape_, path=tensor_folder, chi=chi_ladder[0])
+        gss = GroundStateSearch(psi, ham, init_bond_dim=chi_ladder[0], max_bond_dim=chi_ladder[0])
+        patch_physics_engine(gss)
+        ref_edge = gss.psi.top_edge_id
 
-    gss = GroundStateSearch(psi, ham, init_bond_dim=CHI, max_bond_dim=CHI)
-    patch_physics_engine(gss)
+        for chi in chi_ladder[1:]:
+            gss.max_bond_dim = chi
+            gss.move_canonical_center(ref_edge)
+            gss._prime_renormalized_operators()
+            print(f"warm-up: chi={chi}, {WARMUP_SWEEPS} cheap sweep(s), not recorded", flush=True)
+            gss.run(
+                opt_structure=0,
+                max_num_sweep=WARMUP_SWEEPS,
+                verbose=True,
+                lanczos_tol=WARMUP_LANCZOS_TOL,
+                lanczos_maxiter=WARMUP_LANCZOS_MAXITER,
+                energy_convergence_threshold=0.0,
+                entanglement_convergence_threshold=0.0,
+            )
 
     gss.run(
         opt_structure=0,
