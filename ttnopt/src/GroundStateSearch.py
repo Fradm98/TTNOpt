@@ -45,6 +45,7 @@ class GroundStateSearch(PhysicsEngine):
         self.convergence_history: list = []
         self.converged: bool = False
         self.local_update_diagnostics: list = []
+        self.superblock_energy_trajectory: list = []
 
         super().__init__(
             psi,
@@ -146,6 +147,7 @@ class GroundStateSearch(PhysicsEngine):
             reference_edge_id = self.psi.top_edge_id
         diagnostic_edges = set(diagnostic_edges) if diagnostic_edges else set()
         self.local_update_diagnostics = []
+        self.superblock_energy_trajectory = []
         energy_at_edge: Dict[int, float] = {}
         _energy_at_edge: Dict[int, float] = {}
         ee_at_edge: Dict[int, float] = {}
@@ -228,6 +230,16 @@ class GroundStateSearch(PhysicsEngine):
                     e_before = self._rayleigh_quotient(pre_lanczos_state, ground_state_order)
 
                 ground_state, energy = self.lanczos(ground_state_order, **lanczos_kwargs)
+                # Unconditional (unlike local_update_diagnostics) -- this is
+                # exactly the eigenvalue lanczos() already returns, so
+                # recording it costs nothing extra (no additional matvecs),
+                # for every single superblock diagonalization in the whole
+                # run. Gives a continuous energy-vs-cumulative-update-index
+                # trajectory across sweep boundaries, as opposed to
+                # convergence_history's one-point-per-sweep summary.
+                self.superblock_energy_trajectory.append(
+                    {"sweep": sweep_num + 1, "edge_id": edge_id, "energy": energy}
+                )
                 # last_lanczos_retried is set by ttn_eigensolver (only when
                 # patch_physics_engine() has been applied) and is reset to
                 # False at the top of every ttn_eigensolver() call, so

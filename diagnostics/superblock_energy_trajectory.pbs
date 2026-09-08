@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -N superblock_traj
+#PBS -l select=1:ncpus=16:mem=350gb
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -o pbs_superblock_traj.log
+
+# If your scheduler rejects the combined "select=...:mem=" chunk syntax
+# above, split it instead:
+#   #PBS -l select=1:ncpus=16
+#   #PBS -l mem=350gb
+
+cd $PBS_O_WORKDIR
+
+# --- environment -----------------------------------------------------------
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+
+export OMP_NUM_THREADS=16
+export MKL_NUM_THREADS=16
+export OPENBLAS_NUM_THREADS=16
+
+echo "Job started on $(hostname) at $(date)"
+
+"$PYTHON" -u diagnostics/superblock_energy_trajectory.py > ../5_Z3/logs/superblock_energy_trajectory_run.log 2>&1
+
+echo "Job finished at $(date)"
