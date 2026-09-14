@@ -32,16 +32,16 @@ def count_open_fds():
 
 ## System ##
 model_name = "z3"
-Lx = 3
+Lx = 5
 Ly = 5
 shape = "hexagon"
-# shape = "parallelogram"
+shape = "parallelogram"
 bound_state = "baryon"
 # bound_state = "meson"
-# bound_state = None
+bound_state = None
 chargesx, chargesy = None, None
 # chargesx, chargesy = [2,6], [1,1]
-chargesx, chargesy = [-1,-1,2], [1,4,1]
+# chargesx, chargesy = [-1,-1,2], [1,4,1]
 R = 1
 if chargesx is not None:
     if bound_state == "meson":
@@ -55,16 +55,16 @@ link_plaquettes, bounds = label_links(Lx, Ly, shape)
 
 ## Numerics ##
 g_values = [-2, -1.5, -1, -0.5]
-g_values = np.linspace(0.5,1,6)
+g_values = np.linspace(0.1,1.5,15)
 precision = 3
-g_values = [10]
+# g_values = [10]
 
 # chi ladder: ascend cheaply to chi_max, converge hard there, then descend
 # through the same values for consistently-converged finite-chi scaling data
 # (per advisor's suggestion: truncate down from the best available state
 # rather than optimizing every chi independently from scratch).
 chis = [9,20,40]
-chis = [9,18,27]
+chis = [9,18,27,50]
 SWEEP_ASCEND = 2      # cheap warm-up stages while building up to chi_max
 SWEEP_CONVERGE = 4   # hard-converge stage at chi_max, threshold-governed
 SWEEP_DESCEND = 4    # re-settle stages while truncating down from chi_max

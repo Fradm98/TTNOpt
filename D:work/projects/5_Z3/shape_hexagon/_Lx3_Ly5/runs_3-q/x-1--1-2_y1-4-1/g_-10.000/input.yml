@@ -1,0 +1,63 @@
+system:
+  N: 24
+  spin_size: '1'
+  Lx: 3
+  Ly: 5
+  shape: hexagon
+  bound_state: baryon
+  chargesx:
+  - -1
+  - -1
+  - 2
+  chargesy:
+  - 1
+  - 4
+  - 1
+  R: 3
+  model:
+    type: z3
+    file: D:work/projects/5_Z3/shape_hexagon/_Lx3_Ly5/runs_3-q/x-1--1-2_y1-4-1/g_-10.000/EF_Z.dat
+  g: -10.0
+  MF_X: -0.1
+  EF_Z: D:work/projects/5_Z3/shape_hexagon/_Lx3_Ly5/runs_3-q/x-1--1-2_y1-4-1/g_-10.000/EF_Z.dat
+  precision: 3
+numerics:
+  opt_structure:
+    type: 0
+  initial_bond_dimension: 9
+  energy_convergence_threshold: 1.0e-05
+  entanglement_convergence_threshold: 1.0e-10
+  energy_degeneracy_threshold: 1.0e-13
+  entanglement_degeneracy_threshold: 1.0e-08
+  verbose_sweeps: true
+  init_tree: 2
+  max_bond_dimensions:
+  - 9
+  - 18
+  - 27
+  - 18
+  - 9
+  max_num_sweeps:
+  - 2
+  - 2
+  - 4
+  - 4
+  - 4
+  lanczos_tol:
+  - 1.0e-06
+  - 1.0e-06
+  - null
+  - null
+  - null
+  lanczos_maxiter:
+  - 150
+  - 150
+  - null
+  - null
+  - null
+output:
+  dir: D:work/projects/5_Z3/shape_hexagon/_Lx3_Ly5/runs_3-q/x-1--1-2_y1-4-1/g_-10.000
+  tensors: D:work/projects/5_Z3/shape_hexagon/_Lx3_Ly5/runs_3-q/x-1--1-2_y1-4-1
+  save_tensors: D:work/projects/5_Z3
+  single_site: 0
+  two_site: 0

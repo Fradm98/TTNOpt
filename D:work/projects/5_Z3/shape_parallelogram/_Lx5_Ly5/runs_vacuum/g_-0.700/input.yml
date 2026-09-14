@@ -1,0 +1,56 @@
+system:
+  N: 32
+  spin_size: '1'
+  Lx: 5
+  Ly: 5
+  shape: parallelogram
+  bound_state: null
+  chargesx: null
+  chargesy: null
+  R: null
+  model:
+    type: z3
+    file: D:work/projects/5_Z3/shape_parallelogram/_Lx5_Ly5/runs_vacuum/g_-0.700/EF_Z.dat
+  g: -0.7
+  MF_X: -1.4285714285714286
+  EF_Z: D:work/projects/5_Z3/shape_parallelogram/_Lx5_Ly5/runs_vacuum/g_-0.700/EF_Z.dat
+  precision: 3
+numerics:
+  opt_structure:
+    type: 0
+  initial_bond_dimension: 9
+  energy_convergence_threshold: 1.0e-05
+  entanglement_convergence_threshold: 1.0e-10
+  energy_degeneracy_threshold: 1.0e-13
+  entanglement_degeneracy_threshold: 1.0e-08
+  verbose_sweeps: true
+  init_tree: 3
+  init_tensor_file: D:work/projects/5_Z3/tensors.hdf5
+  init_g: -0.7999999999999999
+  init_chi: 50
+  max_bond_dimensions:
+  - 50
+  - 27
+  - 18
+  - 9
+  max_num_sweeps:
+  - 4
+  - 4
+  - 4
+  - 4
+  lanczos_tol:
+  - null
+  - null
+  - null
+  - null
+  lanczos_maxiter:
+  - null
+  - null
+  - null
+  - null
+output:
+  dir: D:work/projects/5_Z3/shape_parallelogram/_Lx5_Ly5/runs_vacuum/g_-0.700
+  tensors: D:work/projects/5_Z3/shape_parallelogram/_Lx5_Ly5/runs_vacuum
+  save_tensors: D:work/projects/5_Z3
+  single_site: 0
+  two_site: 0
