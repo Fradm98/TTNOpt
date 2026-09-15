@@ -143,6 +143,47 @@ def ground_state_search():
 
     u1_symmetry = True if not isinstance(numerics.U1_symmetry, DotMap) else False
 
+    # Opt-in escape hatch from patch_physics_engine() (TTNLinearOperator's
+    # eigsh/matrix-form replacement for the original dense PhysicsEngine.
+    # lanczos()). Default False preserves existing behavior exactly (every
+    # prior run, and every run that doesn't set this key, stays patched).
+    # Set numerics.unpatched: true to run the original dense eigensolver
+    # instead -- e.g. to reproduce a result without the still-open
+    # tracked-vs-true energy discrepancy that's specific to the patched
+    # path (see diagnostics/z3_5x5_engine_diagnostics.py). Only meaningful
+    # for the non-U1 GroundStateSearch path; U1's GroundStateSearchSparse
+    # is never patched either way.
+    unpatched = bool(numerics.unpatched) if not isinstance(numerics.unpatched, DotMap) else False
+    if unpatched and not u1_symmetry:
+        # The original PhysicsEngine.lanczos() names its tolerance
+        # parameter lanczos_tol and has no iteration-cap parameter at all --
+        # it does NOT accept the tol/max_iter kwargs that
+        # numerics.lanczos_tol/lanczos_maxiter get forwarded into (those
+        # names only match patch_physics_engine's ttn_eigensolver). Passing
+        # either while unpatched raises a confusing TypeError deep inside
+        # GroundStateSearch.run(), so fail fast here instead with a clear
+        # message.
+        if not isinstance(numerics.lanczos_tol, DotMap) and any(
+            t is not None for t in numerics.lanczos_tol
+        ):
+            print("=" * 50)
+            print("⚠️  Error: numerics.unpatched=true is incompatible with a non-null "
+                  "numerics.lanczos_tol -- the original dense lanczos() doesn't accept "
+                  "that override. Remove lanczos_tol (or set every stage to null) to "
+                  "run unpatched.")
+            print("=" * 50)
+            exit()
+        if not isinstance(numerics.lanczos_maxiter, DotMap) and any(
+            m is not None for m in numerics.lanczos_maxiter
+        ):
+            print("=" * 50)
+            print("⚠️  Error: numerics.unpatched=true is incompatible with a non-null "
+                  "numerics.lanczos_maxiter -- the original dense lanczos() doesn't "
+                  "accept that override. Remove lanczos_maxiter (or set every stage to "
+                  "null) to run unpatched.")
+            print("=" * 50)
+            exit()
+
     if u1_symmetry and config.model.type == "XYZ":
         print("=" * 50)
         print("⚠️  Error: U1 symmetry is not supported for the XYZ model.")
@@ -322,7 +363,12 @@ def ground_state_search():
             entanglement_degeneracy_threshold=entanglement_degeneracy_threshold,
         )
 
-    patch_physics_engine(gss)
+    if not u1_symmetry:
+        if unpatched:
+            print("numerics.unpatched=true: running the original dense eigensolver "
+                  "(patch_physics_engine() skipped).")
+        else:
+            patch_physics_engine(gss)
     for i, (max_bond_dim, max_num_sweep) in enumerate(
         zip(numerics.max_bond_dimensions, numerics.max_num_sweeps)
     ):

@@ -751,7 +751,7 @@ def make_gif(
     all_values = []
     dfs = {}
     for g in g_values:
-        folder = get_folder(Lx, Ly, shape, bound_state=bound_state, chargesx=xs, chargesy=ys, R=R)
+        folder = get_folder(Lx, Ly, shape, bound_state=bound_state, chargesx=xs, chargesy=ys, R=R, device=device)
         csv_path = f"{folder}/g_{g:.{precision}f}/run_chi-{chi}/basic.csv"
         try:
             df = pd.read_csv(csv_path)

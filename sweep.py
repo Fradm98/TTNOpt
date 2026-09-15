@@ -64,10 +64,10 @@ precision = 3
 # (per advisor's suggestion: truncate down from the best available state
 # rather than optimizing every chi independently from scratch).
 chis = [9,20,40]
-chis = [9,18,27,50]
-SWEEP_ASCEND = 2      # cheap warm-up stages while building up to chi_max
-SWEEP_CONVERGE = 4   # hard-converge stage at chi_max, threshold-governed
-SWEEP_DESCEND = 4    # re-settle stages while truncating down from chi_max
+chis = [9,18,27]  # unpatched reproduction of the 15-point g-scan (chiladder-gscan) -- chi=50 handled separately for the fine-resolution scan
+SWEEP_ASCEND = 3      # cheap warm-up stages while building up to chi_max
+SWEEP_CONVERGE = 10   # hard-converge stage at chi_max, threshold-governed
+SWEEP_DESCEND = 3    # re-settle stages while truncating down from chi_max
 
 # Loosen the per-two-site eigensolver's own tolerance (ttn_eigensolver's
 # tol/maxiter, NOT the outer sweep-convergence thresholds above) only during
@@ -86,6 +86,20 @@ LANCZOS_MAXITER_ASCEND = 150
 # Set False to fall back to independent random-start runs at every g (e.g.
 # for a clean comparison, or to check for hysteresis around the transition).
 WARM_START_G = True
+WARM_START_G = False  # each g cold-started independently, matching chiladder-gscan's methodology
+
+# Run the original dense eigensolver instead of patch_physics_engine's
+# eigsh/matrix-form replacement. There's a live, unresolved investigation
+# into a tracked-vs-true energy discrepancy specific to the patched path
+# (see diagnostics/z3_5x5_engine_diagnostics.py) -- set True to reproduce a
+# result on the trusted (if slower, and impractical at large chi from a
+# cold start) dense path instead. Forces the ascend-stage lanczos_tol/
+# lanczos_maxiter loosening off below, since the original PhysicsEngine.
+# lanczos() doesn't accept those overrides at all (only ttn_eigensolver
+# does) -- ground_state_search.py fails fast with a clear error if this is
+# True and they end up non-null anyway.
+UNPATCHED = False
+UNPATCHED = True
 
 # Both convergence thresholds below are purely the outer-sweep stopping
 # criteria (compares each edge's local two-tensor energy/entanglement
@@ -98,7 +112,7 @@ WARM_START_G = True
 energy_convergence_threshold = 1e-5
 entanglement_convergence_threshold = 1e-10
 
-device = "pc"
+device = "mac"
 
 if device == "pc":
     drive_path = "D:work/projects/5_Z3"
@@ -108,6 +122,15 @@ elif device == "presto":
     drive_path = "/home/fradm/projects/5_Z3"
 elif device == "mac":
     drive_path = "/Users/fradm/Desktop/projects/5_Z3"
+
+# tensors.hdf5's resume/checkpoint lookup keys only on (shape, Lx, Ly,
+# bound_state, R, g, precision, chi) -- NOT on whether that checkpoint was
+# produced patched or unpatched. The existing tensors.hdf5 had stale patched
+# checkpoints for g=-0.9..-1.5 at chi=9 that would otherwise have caused a
+# false resume-skip for this unpatched run; those specific chi=9 groups have
+# been deleted (backup: tensors.hdf5.bak-before-unpatched-cleanup) so this
+# run actually recomputes them. save_tensor() itself safely overwrites
+# whatever it writes (chi=18/27), so nothing else needed cleaning.
 
 
 folder = f"{drive_path}/shape_{shape}/_Lx{Lx}_Ly{Ly}"
@@ -135,7 +158,7 @@ print(f"model: {model_name}, shape: {shape}, Lx:{Lx}, Ly:{Ly}")
 print(f"N plaquette (dual lattice): {N}, L links (direct lattice): {len(link_plaquettes)}")
 print(f"bound state: {bound_state}, R: {R}, parameter space:{len(g_values)}, g ext: {g_values[0]:.{precision}f}-{g_values[-1]:.{precision}f}")
 print(f"bond dimensions: {chis} (ascend {SWEEP_ASCEND}/converge {SWEEP_CONVERGE}/descend {SWEEP_DESCEND} sweeps), device: {device}")
-print(f"warm_start_g: {WARM_START_G}")
+print(f"warm_start_g: {WARM_START_G}, unpatched: {UNPATCHED}")
 print(f"[fd-check] open fds at script start: {count_open_fds()} (soft ulimit: {resource.getrlimit(resource.RLIMIT_NOFILE)[0]})", flush=True)
 
 # Process g in confined-phase-first order (g=-1.0, largest |g|, first) so the
@@ -213,6 +236,7 @@ for idx, g_raw in enumerate(pbar):
         # values, it has no visibility into what a single gss subprocess is
         # doing sweep-by-sweep.
         "verbose_sweeps": True,
+        "unpatched": UNPATCHED,
     }
 
     if use_warm_start:
@@ -234,8 +258,13 @@ for idx, g_raw in enumerate(pbar):
         )
         n_ascend = len(chis) - 1  # everything except the chis[-1] converge-hard stage
         n_rest = 1 + len(descend_chis)
-        numerics_dict["lanczos_tol"] = [LANCZOS_TOL_ASCEND] * n_ascend + [None] * n_rest
-        numerics_dict["lanczos_maxiter"] = [LANCZOS_MAXITER_ASCEND] * n_ascend + [None] * n_rest
+        # Loosened ascend tolerance is a patched-only trick (see UNPATCHED's
+        # docstring above) -- stay at the tight default throughout when
+        # running unpatched instead.
+        ascend_tol = None if UNPATCHED else LANCZOS_TOL_ASCEND
+        ascend_maxiter = None if UNPATCHED else LANCZOS_MAXITER_ASCEND
+        numerics_dict["lanczos_tol"] = [ascend_tol] * n_ascend + [None] * n_rest
+        numerics_dict["lanczos_maxiter"] = [ascend_maxiter] * n_ascend + [None] * n_rest
 
     input_dict = {
     "system":

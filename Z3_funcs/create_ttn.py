@@ -12,7 +12,7 @@ def get_rnd_tree(Lx,Ly,shape,path,chi):
     d = 3
 
     tree = ttn(links, top_edge_id=links[-1][-1])
-    tensors = [np.zeros((d,d,chi)) if edge[0] in tree.physical_edges else np.zeros((chi,chi,chi)) for edge in tree.edges]
+    tensors = [np.zeros((d,d,chi), dtype=np.complex128) if edge[0] in tree.physical_edges else np.zeros((chi,chi,chi), dtype=np.complex128) for edge in tree.edges]
 
     rnd_tree = rt(links, tensors, top_edge_id=links[-1][-1])
     rnd_tree.init_random(edges=tree.edges, top_edge_id=tree.top_edge_id, edge_dims=rnd_tree.edge_dims, init_bond_dimension=chi)

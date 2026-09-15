@@ -76,6 +76,20 @@ def create_graph(Lx: int,Ly: int, shape: str="parallelogram"):
 
         # get the parent labels of the next coarse-grained lattice
         groups_cgl, _ = group_plaquettes_coarse_gen(Lx=Lx_cg, Ly=Ly_cg, shape=shape, cgl=0, off=int(dof + 2*nplaqs_cgl))
+        # This grouping must be reordered exactly like the children grouping
+        # above (same reorder_by_next_level treatment against the same
+        # next-level clustering, re-expressed at this off/scale) -- otherwise
+        # the position-based zip() below silently mismatches whenever the two
+        # sweeps' anchor visitation order diverges (verified against the
+        # independently-computed group_plaquettes_coarse_gen(cgl=cgl_max)
+        # ground truth: without this, the resulting tree's top-level branches
+        # match zero of the true coarse-grained groups; with it, they match
+        # exactly).
+        if cgl_max - cgl - 1 > 0:
+            groups_max_next, _ = group_plaquettes_coarse_gen(
+                Lx=Lx_cg, Ly=Ly_cg, shape=shape, cgl=cgl_max - cgl - 1, off=int(dof + 2*nplaqs_cgl)
+            )
+            groups_cgl, _ = reorder_by_next_level(group_k=groups_cgl, group_k1=groups_max_next)
         groups_cgl_flat = np.array([g['plaquettes'] for g in groups_cgl]).flatten()
         # create the second layer of the perfect binary tree at a certain cgl
         # the coupled four triangles (children) get connected to the (parent) coarse-grained sites
