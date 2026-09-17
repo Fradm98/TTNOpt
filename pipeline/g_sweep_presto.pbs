@@ -1,0 +1,49 @@
+#!/bin/bash
+#PBS -N g_sweep
+#PBS -l select=1:ncpus=16:mem=350gb
+#PBS -l walltime=48:00:00
+#PBS -j oe
+#PBS -o pbs_g_sweep.log
+
+# PBS submission for pipeline/g_sweep.py on the presto cluster (device=presto
+# resolves to drive_path=/home/fradm/projects/5_Z3, matching sweep.py's own
+# device mapping -- see pipeline.g_sweep.DEVICE_DRIVE_PATHS).
+#
+# If your scheduler rejects the combined "select=...:mem=" chunk syntax
+# above, split it instead:
+#   #PBS -l select=1:ncpus=16
+#   #PBS -l mem=350gb
+#
+# Edit the CLI args in the `"$PYTHON" -u -m pipeline.g_sweep ...` line below
+# per run (g range, chis, sweep budget, patched/unpatched, warm-start-g) --
+# everything pipeline/g_sweep.py's CLI takes is available here, nothing is
+# PBS-specific beyond the resource/env setup.
+#
+# Submit with: qsub pipeline/g_sweep_presto.pbs
+
+cd $PBS_O_WORKDIR
+
+# `conda activate` inside a non-interactive PBS job shell is unreliable, so
+# call this env's python by absolute path instead (same reasoning as the
+# existing diagnostics/*.pbs scripts).
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+
+# Must match select=1:ncpus=16 above.
+export OMP_NUM_THREADS=16
+export MKL_NUM_THREADS=16
+export OPENBLAS_NUM_THREADS=16
+
+mkdir -p ../5_Z3/logs
+
+echo "Job started on $(hostname) at $(date)"
+
+# -u: unbuffered, tail -f-able in real time.
+"$PYTHON" -u -m pipeline.g_sweep \
+    --device presto \
+    --g-min 0.1 --g-max 1.5 --n-g 15 \
+    --chis 9 18 27 \
+    --sweeps-ascend 3 --sweeps-converge 10 --sweeps-descend 3 \
+    --unpatched \
+    > ../5_Z3/logs/g_sweep_run.log 2>&1
+
+echo "Job finished at $(date)"
