@@ -19,7 +19,7 @@ make_field_entropy_visuals.py all read.
 
 CLI example (matches this investigation's 15-point scan):
   python pipeline/g_sweep.py --g-min 0.1 --g-max 1.5 --n-g 15 \
-      --chis 9 18 27 --sweeps-ascend 3 --sweeps-converge 10 --sweeps-descend 3 \
+      --chis 9 18 27 --sweeps-ascend 3 --sweeps-converge 10 --sweeps-descend 10 \
       --unpatched
 
 Importable example:
@@ -73,7 +73,7 @@ def run_g_sweep(
     Lx=5, Ly=5, shape="parallelogram",
     bound_state=None, chargesx=None, chargesy=None, R=None,
     precision=3,
-    sweeps_ascend=3, sweeps_converge=10, sweeps_descend=3,
+    sweeps_ascend=3, sweeps_converge=30, sweeps_descend=10,
     energy_convergence_threshold=1e-10,
     entanglement_convergence_threshold=1e-10,
     unpatched=True,
@@ -90,6 +90,21 @@ def run_g_sweep(
     Visits g_values in confined-phase-first order (largest |g| first).
     Resume-safe: re-running with the same drive_path/g_values/chis skips
     whatever's already checkpointed.
+
+    sweeps_descend defaults to 10, not a token 3: a direct experiment
+    (descending chi=50 -> 27 -> 18 -> 9 with only 3 resettling sweeps per
+    stage vs. 10) showed the 3-sweep version can be badly under-converged
+    -- e.g. chi=27's max_ee_diff stuck at ~5e-5 to 7e-5 (vs. chi=27's own
+    10-sweep hard-converge reaching ~1e-9) -- while descending with 10
+    sweeps instead not only fixes this but comes out MORE converged than
+    independently hard-converging each chi from scratch (e.g. chi=27
+    reaching ~1e-12, chi=18 ~1e-9, both beating the ascend/converge/
+    descend-built coarse-scan equivalents by 2-6 orders of magnitude).
+    3 sweeps just isn't enough budget to re-equilibrate the WHOLE tree
+    after a large bond-dimension cut of this size; a small sweep-to-sweep
+    residual after only 3 sweeps can mean "stable" without meaning
+    "close to the true chi-limited optimum". Don't go back to a low
+    sweeps_descend without re-checking this.
     """
     g_values = [float(g) for g in g_values]
     chis = list(chis)
@@ -198,11 +213,11 @@ def main():
     p.add_argument("--n-g", type=int, required=True)
     p.add_argument("--chis", type=int, nargs="+", default=[9, 18, 27])
     p.add_argument("--sweeps-ascend", type=int, default=3)
-    p.add_argument("--sweeps-converge", type=int, default=10)
-    p.add_argument("--sweeps-descend", type=int, default=3)
+    p.add_argument("--sweeps-converge", type=int, default=40)
+    p.add_argument("--sweeps-descend", type=int, default=10)
     p.add_argument("--lx", type=int, default=5)
-    p.add_argument("--ly", type=int, default=5)
-    p.add_argument("--shape", default="parallelogram")
+    p.add_argument("--ly", type=int, default=9)
+    p.add_argument("--shape", default="hexagon")
     p.add_argument("--precision", type=int, default=3)
     p.add_argument("--unpatched", action="store_true", default=True)
     p.add_argument("--patched", dest="unpatched", action="store_false")

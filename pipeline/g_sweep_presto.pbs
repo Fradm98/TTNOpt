@@ -40,9 +40,9 @@ echo "Job started on $(hostname) at $(date)"
 # -u: unbuffered, tail -f-able in real time.
 "$PYTHON" -u -m pipeline.g_sweep \
     --device presto \
-    --g-min 0.1 --g-max 1.5 --n-g 15 \
-    --chis 9 18 27 \
-    --sweeps-ascend 3 --sweeps-converge 10 --sweeps-descend 3 \
+    --g-min 0.4 --g-max 1.5 --n-g 12 \
+    --chis 9 27 50 81\
+    --sweeps-ascend 3 --sweeps-converge 40 --sweeps-descend 10 \
     --unpatched \
     > ../5_Z3/logs/g_sweep_run.log 2>&1
 
