@@ -31,7 +31,9 @@ import subprocess
 
 import yaml
 
-from pipeline.g_sweep import get_folder, DEVICE_DRIVE_PATHS, DEFAULT_DEVICE, drive_path_for_device
+from pipeline.g_sweep import (
+    get_folder, DEVICE_DRIVE_PATHS, DEFAULT_DEVICE, drive_path_for_device, GSS_EXECUTABLE,
+)
 from Z3_funcs.create_graph_file import create_ids_coeffs_file, nplaqs
 
 
@@ -93,7 +95,7 @@ def descend_existing(
 
         print(f"\n[g={g:.{precision}f}] descending {source_chi} -> {list(descend_chis)}", flush=True)
         try:
-            subprocess.run(["gss", inputfile], check=True)
+            subprocess.run([GSS_EXECUTABLE, inputfile], check=True)
         except subprocess.CalledProcessError as e:
             # One point's numerical hiccup (e.g. a rare LAPACK SVD
             # non-convergence) shouldn't kill the other, unrelated

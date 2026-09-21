@@ -28,7 +28,9 @@ Importable example:
 """
 import argparse
 import os
+import shutil
 import subprocess
+import sys
 
 import numpy as np
 import yaml
@@ -47,6 +49,33 @@ DEVICE_DRIVE_PATHS = {
 }
 DEFAULT_DEVICE = "mac"
 DEFAULT_DRIVE_PATH = DEVICE_DRIVE_PATHS[DEFAULT_DEVICE]
+
+
+def _gss_executable():
+    """Absolute path to the `gss` console script installed alongside the
+    running interpreter (sys.executable), e.g.
+    /opt/homebrew/.../envs/ttn/bin/gss locally or
+    $HOME/.conda/envs/ttn/bin/gss on presto.
+
+    subprocess.run(["gss", ...]) only works if the conda env's bin/ is on
+    PATH, which a non-interactive shell (a PBS job, a nohup'd background
+    run, an IDE's "Run" button) is not guaranteed to have even though the
+    right python is being used -- `conda activate` inside such a shell is
+    unreliable (see g_sweep_presto.pbs's own comment on this). Resolving
+    next to sys.executable sidesteps PATH entirely: `gss` is installed into
+    the same env's bin/ as `python` is, always.
+    """
+    candidate = os.path.join(os.path.dirname(sys.executable), "gss")
+    if os.path.isfile(candidate):
+        return candidate
+    # Fall back to PATH lookup (e.g. sys.executable is a symlink/venv shim
+    # in some other layout) so this doesn't regress a setup where the bare
+    # "gss" already worked.
+    found = shutil.which("gss")
+    return found if found else "gss"
+
+
+GSS_EXECUTABLE = _gss_executable()
 
 
 def drive_path_for_device(device):
@@ -199,7 +228,7 @@ def run_g_sweep(
         with open(inputfile, "w") as f:
             yaml.dump(input_dict, f, sort_keys=False)
 
-        subprocess.run(["gss", inputfile], check=True)
+        subprocess.run([GSS_EXECUTABLE, inputfile], check=True)
         previous_g = g
 
     print("DONE")
