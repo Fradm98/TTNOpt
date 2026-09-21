@@ -134,9 +134,29 @@ def run_g_sweep(
     residual after only 3 sweeps can mean "stable" without meaning
     "close to the true chi-limited optimum". Don't go back to a low
     sweeps_descend without re-checking this.
+
+    sweeps_descend may also be a list of length len(chis)-1, one entry per
+    descend stage in chis[-2::-1] order (i.e. chi_max down to chis[0]) --
+    e.g. chis=[9,27,50,81] with sweeps_descend=[25,20,10] gives 81->50 25
+    sweeps, 50->27 20 sweeps, 27->9 10 sweeps. A larger bond-dimension cut
+    (chi_max down to the next stage right after the expensive converge
+    stage) generally needs more resettling budget than a smaller one
+    further down the ladder, so tapering the descend budget is a
+    reasonable choice, not just an arbitrary distribution of the same
+    total. A bare int still broadcasts to every stage as before.
     """
     g_values = [float(g) for g in g_values]
     chis = list(chis)
+    n_descend = len(chis) - 1
+    if isinstance(sweeps_descend, (list, tuple)):
+        if len(sweeps_descend) != n_descend:
+            raise ValueError(
+                f"sweeps_descend list must have one entry per descend stage "
+                f"(len(chis)-1={n_descend}), got {len(sweeps_descend)}: {sweeps_descend}"
+            )
+        sweeps_descend_list = list(sweeps_descend)
+    else:
+        sweeps_descend_list = [sweeps_descend] * n_descend
     N = nplaqs(Lx, Ly, shape)
     folder, chargesx, chargesy = get_folder(drive_path, Lx, Ly, shape, bound_state, chargesx, chargesy, R)
     os.makedirs(folder, exist_ok=True)
@@ -145,7 +165,7 @@ def run_g_sweep(
 
     print(f"model: {model_name}, shape: {shape}, Lx:{Lx}, Ly:{Ly}, bound_state: {bound_state}")
     print(f"parameter space: {len(g_values)} points, g ext: {min(g_values):.{precision}f}..{max(g_values):.{precision}f}")
-    print(f"bond dimensions: {chis} (ascend {sweeps_ascend}/converge {sweeps_converge}/descend {sweeps_descend}), "
+    print(f"bond dimensions: {chis} (ascend {sweeps_ascend}/converge {sweeps_converge}/descend {sweeps_descend_list}), "
           f"unpatched: {unpatched}, warm_start_g: {warm_start_g}", flush=True)
 
     # confined-phase-first order: sort by |g| descending
@@ -194,14 +214,14 @@ def run_g_sweep(
             numerics_dict["init_g"] = previous_g
             numerics_dict["init_chi"] = chis[-1]
             numerics_dict["max_bond_dimensions"] = [chis[-1]] + descend_chis
-            numerics_dict["max_num_sweeps"] = [sweeps_converge] + [sweeps_descend] * len(descend_chis)
+            numerics_dict["max_num_sweeps"] = [sweeps_converge] + sweeps_descend_list
             numerics_dict["lanczos_tol"] = [None] * len(numerics_dict["max_bond_dimensions"])
             numerics_dict["lanczos_maxiter"] = [None] * len(numerics_dict["max_bond_dimensions"])
         else:
             numerics_dict["init_tree"] = 2
             numerics_dict["max_bond_dimensions"] = chis + descend_chis
             numerics_dict["max_num_sweeps"] = (
-                [sweeps_ascend] * (len(chis) - 1) + [sweeps_converge] + [sweeps_descend] * len(descend_chis)
+                [sweeps_ascend] * (len(chis) - 1) + [sweeps_converge] + sweeps_descend_list
             )
             n_ascend = len(chis) - 1
             n_rest = 1 + len(descend_chis)
@@ -243,7 +263,10 @@ def main():
     p.add_argument("--chis", type=int, nargs="+", default=[9, 18, 27])
     p.add_argument("--sweeps-ascend", type=int, default=3)
     p.add_argument("--sweeps-converge", type=int, default=40)
-    p.add_argument("--sweeps-descend", type=int, default=10)
+    p.add_argument("--sweeps-descend", type=int, nargs="+", default=[10],
+                    help="one value (broadcast to every descend stage) or one value "
+                         "per descend stage, in chi_max-down-to-chis[0] order "
+                         "(len(chis)-1 values)")
     p.add_argument("--lx", type=int, default=5)
     p.add_argument("--ly", type=int, default=9)
     p.add_argument("--shape", default="hexagon")
@@ -279,7 +302,11 @@ def main():
     run_g_sweep(
         g_values=g_values, chis=args.chis, Lx=args.lx, Ly=args.ly, shape=args.shape,
         precision=args.precision, sweeps_ascend=args.sweeps_ascend,
-        sweeps_converge=args.sweeps_converge, sweeps_descend=args.sweeps_descend,
+        sweeps_converge=args.sweeps_converge,
+        # A single CLI value still means "broadcast to every descend stage"
+        # (nargs="+" always returns a list, even for one value) -- only an
+        # explicit multi-value list is treated as per-stage.
+        sweeps_descend=args.sweeps_descend[0] if len(args.sweeps_descend) == 1 else args.sweeps_descend,
         unpatched=args.unpatched, warm_start_g=args.warm_start_g, drive_path=drive_path,
         lanczos_tol_ascend=args.lanczos_tol_ascend,
         lanczos_maxiter_ascend=args.lanczos_maxiter_ascend,

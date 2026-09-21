@@ -1,0 +1,54 @@
+#!/bin/bash
+#PBS -N g_sweep_timing_unpatched
+#PBS -l select=1:ncpus=16:mem=350gb
+#PBS -l walltime=4:00:00
+#PBS -j oe
+#PBS -o pbs_g_sweep_timing_unpatched.log
+
+# Patched-vs-unpatched SPEED comparison, one half. Submit THIS and
+# g_sweep_presto_timing_patched.pbs together (qsub both back to back) so
+# they run concurrently on separate PBS allocations -- unlike running both
+# on a single shared machine, presto gives each job its own ncpus=16
+# chunk, so neither run's wall time is inflated by CPU contention from the
+# other. Uses its OWN --drive-path (not --device presto's shared
+# /home/fradm/projects/5_Z3) so the two jobs never touch the same
+# tensors.hdf5 concurrently.
+#
+# Single g-point (g=1.5), same ascend(3)/converge(10)/descend(3) chi-ladder
+# recipe and chis=[9,18,27] as the local 5x5 comparison this mirrors, so
+# all runs (local unpatched 15pt, local patched 15pt, presto unpatched
+# 1pt, presto patched 1pt) share the same recipe and lattice.
+#
+# If your scheduler rejects the combined "select=...:mem=" chunk syntax,
+# split it instead:
+#   #PBS -l select=1:ncpus=16
+#   #PBS -l mem=350gb
+#
+# Submit with: qsub diagnostics/g_sweep_presto_timing_unpatched.pbs
+
+cd $PBS_O_WORKDIR
+
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+DRIVE_PATH="/home/fradm/projects/5_Z3_timing_unpatched"
+
+export OMP_NUM_THREADS=16
+export MKL_NUM_THREADS=16
+export OPENBLAS_NUM_THREADS=16
+
+mkdir -p "$DRIVE_PATH/logs"
+
+echo "Job started on $(hostname) at $(date)"
+
+# `time` (bash builtin) reports wall/user/sys for the whole invocation to
+# this PBS driver log (captured via -j oe -o above) -- python's own -u
+# stdout/stderr goes to the dedicated per-run log instead.
+time "$PYTHON" -u -m pipeline.g_sweep \
+    --lx 5 --ly 5 --shape parallelogram \
+    --g-min 1.5 --g-max 1.5 --n-g 1 \
+    --chis 9 18 27 \
+    --sweeps-ascend 3 --sweeps-converge 10 --sweeps-descend 3 \
+    --unpatched \
+    --drive-path "$DRIVE_PATH" \
+    > "$DRIVE_PATH/logs/g_sweep_run.log" 2>&1
+
+echo "Job finished at $(date)"
