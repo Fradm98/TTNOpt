@@ -997,14 +997,20 @@ def cmd_compare_patched_vs_unpatched(args):
                 indep.append(float(row["independent_energy"]))
         return idx, sweep, ref, indep
 
-    p_path = os.path.join(DATA_DIR, f"g{G:.3f}_chi{args.chi}_patched_optstruct0_independent_energy.csv")
-    u_path = os.path.join(DATA_DIR, f"g{G:.3f}_chi{args.chi}_unpatched-dense_optstruct0_independent_energy.csv")
+    # Same size_prefix convention cmd_trajectory uses when writing these, so
+    # a non-default lattice (e.g. --lx 3 --ly 3) can be compared too.
+    size_prefix = "" if (args.lx, args.ly) == (Lx, Ly) else f"{args.lx}x{args.ly}_"
+    size_label = f"{args.lx}x{args.ly}"
+    p_path = os.path.join(DATA_DIR, f"{size_prefix}g{G:.3f}_chi{args.chi}_patched_optstruct0_independent_energy.csv")
+    u_path = os.path.join(DATA_DIR, f"{size_prefix}g{G:.3f}_chi{args.chi}_unpatched-dense_optstruct0_independent_energy.csv")
     for p in (p_path, u_path):
         if not os.path.exists(p):
             raise FileNotFoundError(
                 f"{p} not found -- run e.g.\n"
-                f"  python {os.path.basename(__file__)} trajectory --chi {args.chi} --patch --independent\n"
-                f"  python {os.path.basename(__file__)} trajectory --chi {args.chi} --independent"
+                f"  python {os.path.basename(__file__)} trajectory --lx {args.lx} --ly {args.ly} "
+                f"--chi {args.chi} --patch --independent\n"
+                f"  python {os.path.basename(__file__)} trajectory --lx {args.lx} --ly {args.ly} "
+                f"--chi {args.chi} --independent"
             )
     idx_p, sweep_p, ref_p, indep_p = load(p_path)
     idx_u, sweep_u, ref_u, indep_u = load(u_path)
@@ -1019,9 +1025,9 @@ def cmd_compare_patched_vs_unpatched(args):
     _style_log_yaxis(ax, 1e-15, 1e-5)
     ax.set_xlabel("cumulative superblock update index", fontsize=12)
     ax.set_ylabel("|ref_energy - independent_energy|", fontsize=12)
-    ax.set_title(f"chi={args.chi} (unpatched-dense) tracked-vs-independent energy gap\ng={G}", fontsize=13)
+    ax.set_title(f"{size_label} chi={args.chi} (unpatched-dense) tracked-vs-independent energy gap\ng={G}", fontsize=13)
     fig.tight_layout()
-    out1 = os.path.join(FIG_DIR, f"g{G:.3f}_chi{args.chi}_unpatched_diff_readable.png")
+    out1 = os.path.join(FIG_DIR, f"{size_prefix}g{G:.3f}_chi{args.chi}_unpatched_diff_readable.png")
     fig.savefig(out1, dpi=200)
     plt.close(fig)
     print(f"saved: {out1}")
@@ -1033,10 +1039,10 @@ def cmd_compare_patched_vs_unpatched(args):
     _style_log_yaxis(ax, 1e-15, 1e-1)
     ax.set_xlabel("cumulative superblock update index", fontsize=12)
     ax.set_ylabel("|ref_energy - independent_energy|", fontsize=12)
-    ax.set_title(f"chi={args.chi}: patched vs unpatched tracked-vs-independent gap -- g={G}", fontsize=13)
+    ax.set_title(f"{size_label} chi={args.chi}: patched vs unpatched tracked-vs-independent gap -- g={G}", fontsize=13)
     ax.legend(fontsize=11, loc="lower right")
     fig.tight_layout()
-    out2 = os.path.join(FIG_DIR, f"g{G:.3f}_chi{args.chi}_patched_vs_unpatched_diff.png")
+    out2 = os.path.join(FIG_DIR, f"{size_prefix}g{G:.3f}_chi{args.chi}_patched_vs_unpatched_diff.png")
     fig.savefig(out2, dpi=200)
     plt.close(fig)
     print(f"saved: {out2}")
@@ -1280,6 +1286,10 @@ def main():
     p_cmp.add_argument("--kind", choices=["opt_structure", "patched_vs_unpatched", "lattice_size"], required=True)
     p_cmp.add_argument("--opt-structure", type=int, default=0, choices=[0, 1, 2])
     p_cmp.add_argument("--chi", type=int, default=20)
+    p_cmp.add_argument("--lx", type=int, default=Lx,
+                        help="kind=patched_vs_unpatched only: lattice width of the trajectory data to compare")
+    p_cmp.add_argument("--ly", type=int, default=Ly,
+                        help="kind=patched_vs_unpatched only: lattice height of the trajectory data to compare")
 
     def _size_triplet(s):
         lx, ly, chi = s.lower().split("x")

@@ -172,7 +172,8 @@ for g_raw in pbar:
 
     previous_g = g
 
-csv_path = os.path.join(os.path.dirname(__file__), "z3_5x5_warmstart_results", "finegrained_gscan_warmstart_outcomes.csv")
+# Alongside this run's own data, not in the git repo.
+csv_path = os.path.join(drive_path, "logs", "finegrained_gscan_warmstart_outcomes.csv")
 os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 with open(csv_path, "w", newline="") as f:
     writer = csv.writer(f)

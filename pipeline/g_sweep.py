@@ -222,10 +222,26 @@ def main():
     p.add_argument("--unpatched", action="store_true", default=True)
     p.add_argument("--patched", dest="unpatched", action="store_false")
     p.add_argument("--warm-start-g", action="store_true")
+    # Only meaningful with --patched: the unpatched dense lanczos() has no
+    # tolerance/iteration parameters at all, so run_g_sweep drops these.
+    p.add_argument("--lanczos-tol-ascend", type=float, default=None,
+                    help="loosen the eigensolver tolerance during the cheap ascend "
+                         "stages only (patched runs only; e.g. 1e-6)")
+    p.add_argument("--lanczos-maxiter-ascend", type=int, default=None,
+                    help="cap eigensolver iterations during the ascend stages only "
+                         "(patched runs only)")
     p.add_argument("--device", choices=list(DEVICE_DRIVE_PATHS), default=DEFAULT_DEVICE)
     p.add_argument("--drive-path", default=None,
                     help="override the path derived from --device")
     args = p.parse_args()
+
+    if args.unpatched and (
+        args.lanczos_tol_ascend is not None or args.lanczos_maxiter_ascend is not None
+    ):
+        p.error(
+            "--lanczos-tol-ascend/--lanczos-maxiter-ascend require --patched; "
+            "the original dense lanczos() has no such parameters."
+        )
 
     g_raw = np.linspace(args.g_min, args.g_max, args.n_g)
     g_values = [-float(g) for g in g_raw]
@@ -236,6 +252,8 @@ def main():
         precision=args.precision, sweeps_ascend=args.sweeps_ascend,
         sweeps_converge=args.sweeps_converge, sweeps_descend=args.sweeps_descend,
         unpatched=args.unpatched, warm_start_g=args.warm_start_g, drive_path=drive_path,
+        lanczos_tol_ascend=args.lanczos_tol_ascend,
+        lanczos_maxiter_ascend=args.lanczos_maxiter_ascend,
     )
 
 

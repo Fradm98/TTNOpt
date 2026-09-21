@@ -1,35 +1,40 @@
 """
 TTNLinearOperator.py
 --------------------
-Drop-in replacement for the memory-heavy parts of PhysicsEngine:
+Alternative two-site eigensolver for PhysicsEngine:
 
-  - TTNHamiltonianOperator   : scipy LinearOperator wrapping the on-the-fly
-                               H|psi> application at the two-site canonical center
-  - ttn_eigensolver          : replaces PhysicsEngine.lanczos() entirely
-  - compute_block_ham_action : replaces _block_ham_psi (never forms χ⁴ tensor)
-  - patch_physics_engine     : monkey-patches an existing PhysicsEngine instance
+  - TTNHamiltonianOperator : scipy LinearOperator wrapping the on-the-fly
+                             H|psi> application at the two-site canonical center
+  - ttn_eigensolver        : replaces PhysicsEngine.lanczos() entirely
+  - patch_physics_engine   : monkey-patches an existing PhysicsEngine instance
 
-Memory reduction
-----------------
-Before: block_hamiltonians stores one (χ,χ,χ,χ) array per internal edge
-        → 94 × χ⁴ × 16 bytes  ≈ 60 GB at χ=100
+What this actually buys
+-----------------------
+NOT block-Hamiltonian storage: PhysicsEngine._set_block_hamiltonian already
+stores each edge's block Hamiltonian as a (χ, χ) matrix, and this module reads
+those same matrices. The difference is purely in the eigensolver.
 
-After:  nothing is stored; each matvec recomputes the action of the block
-        Hamiltonian for the *current* canonical center on the fly and discards
-        all intermediates immediately.  Peak transient memory per matvec is
-        O(χ³) — the same order as the tensors themselves.
+The original PhysicsEngine.lanczos() is a hand-rolled two-pass Lanczos: it
+tridiagonalizes without storing the Krylov basis, then REGENERATES every
+Krylov vector in a second pass to reconstruct the eigenvector (so every
+H|psi> is computed twice), and then runs an inverse-iteration refinement loop
+until ||H|v> - e|v>|| < inverse_tol, which is unbounded in iteration count.
+ttn_eigensolver replaces all of that with ARPACK's implicitly-restarted
+Lanczos (scipy eigsh), which needs one matvec per iteration and a bounded
+ncv-vector basis, and exposes tol/maxiter/ncv so warm-up sweeps can be run
+cheaply.
+
+Both paths share the SAME renormalized operators and block Hamiltonians built
+by the sweep loop, so they must agree elementwise on H|psi>, not merely on the
+resulting energy -- see diagnostics/test_linop_matches_dense_matvec.py.
 
 Usage
 -----
-Either call patch_physics_engine(engine) once after construction, or replace
-the relevant methods manually (see bottom of file).
-
-The public API that GroundStateSearch.run() calls is unchanged:
+Call patch_physics_engine(engine) once after construction. The public API that
+GroundStateSearch.run() calls is unchanged:
     ground_state, energy = engine.lanczos(ground_state_order)
 """
 
-from collections import defaultdict
-from copy import deepcopy
 from typing import List, Optional
 
 import numpy as np
@@ -84,37 +89,30 @@ def _block_ham_matvec(
     result of shape `shape`
     """
     v_moved = _prep_leg(v_tensor, leg, shape)
-    result = block_ham_matrix @ v_moved
+    # .T because every renormalized operator in this engine is stored with
+    # index 0 on the un-conjugated-tensor side and index 1 on the conjugated
+    # side (see PhysicsEngine._set_edge_spin / _set_block_hamiltonian, both
+    # emitting output_edge_order=[bra[2], ket[2]]). Index 0 is therefore the
+    # one the dense consumers contract with psi (_block_ham_psi does
+    # `psi_[apply_id] ^ h[0]`). Dropping the .T here silently applies H^T,
+    # which has the same spectrum for Hermitian H and so hides in any
+    # energy-only comparison -- but is wrong for any complex Hamiltonian.
+    result = block_ham_matrix.T @ v_moved
     return _unprep_leg(result, leg, shape)
 
 
 def _compute_block_ham_matrix(engine, edge_id: int) -> Optional[np.ndarray]:
     """
-    Compute the block Hamiltonian for `edge_id` as a (χ, χ) matrix on the fly,
-    by walking up from the physical edges using the stored isometries.
+    The block Hamiltonian for `edge_id` as a (χ, χ) matrix, or None if this
+    edge carries no block-Hamiltonian contribution.
 
-    This replaces the need to store block_hamiltonians[edge_id] as (χ,χ,χ,χ).
-    Returns None if edge_id has no block Hamiltonian contribution.
-
-    The contraction is:
-        H_block[a,b] = Σ_{ij} T*[i,j,a] H_child[i,i',j,j'] T[i',j',b]
-
-    which is equivalent to the existing _set_block_hamiltonian logic but
-    returned as a matrix instead of stored.
+    PhysicsEngine._set_block_hamiltonian already stores these as (χ, χ) --
+    it contracts the rank-4 two-leg block Hamiltonian from
+    _get_block_hamiltonian down against the isometry and emits
+    output_edge_order=[bra[2], ket[2]] -- so this is a plain lookup, with
+    index 0 on the un-conjugated-tensor side.
     """
-    if edge_id not in engine.block_hamiltonians:
-        return None
-    # block_hamiltonians stores the (χ,χ,χ,χ) tensor — reshape to matrix here
-    # so the caller only ever sees a 2-D array
-    bh = engine.block_hamiltonians[edge_id]
-    chi = int(np.sqrt(bh.size))  # bh is (χ,χ,χ,χ), flattened pairs → (χ²,χ²)... 
-    # Actually bh shape is (chi_out, chi_out) if already a matrix, or (d0,d1,d0,d1)
-    # We accept both forms:
-    if bh.ndim == 4:
-        d0, d1 = bh.shape[0], bh.shape[1]
-        return bh.reshape(d0 * d1, d0 * d1)
-    else:
-        return bh  # already a matrix
+    return engine.block_hamiltonians.get(edge_id)
 
 
 def _apply_ham_psi_matvec(
@@ -169,7 +167,8 @@ def _apply_ham_psi_matvec(
     for leg, edge_id in enumerate(edge_legs):
         H_mat = _compute_block_ham_matrix(engine, edge_id)
         if H_mat is not None:
-            result += _unprep_leg(H_mat @ get_v_prepped(leg), leg, psi_shape)
+            # .T for the same index-convention reason as in _block_ham_matvec.
+            result += _unprep_leg(H_mat.T @ get_v_prepped(leg), leg, psi_shape)
 
     # ------------------------------------------------------------------
     # Part B: two-body interaction terms connecting pairs of legs
@@ -189,6 +188,20 @@ def _apply_ham_psi_matvec(
     for leg_a, leg_b, (edge_a, edge_b) in leg_pairs:
         l_bare = get_bare_edges(edge_a, engine.psi.edges, engine.psi.physical_edges)
         r_bare = get_bare_edges(edge_b, engine.psi.edges, engine.psi.physical_edges)
+
+        # Paper Sec. 3.2.2 ("we adjust the order of summation of spin
+        # operators"): every term sharing the same partner (site, operator)
+        # is summed into ONE matrix on the larger side before being applied,
+        # so the number of O(chi^5) two-operator applications is set by the
+        # smaller region rather than by the raw term count. Grouping side is
+        # chosen by region size, the paper's g' > g criterion -- same rule the
+        # dense _ham_psi uses via `len(l_bare_edges) > len(r_bare_edges)`.
+        group_left = len(l_bare) > len(r_bare)
+        grouped_leg, partner_leg = (leg_a, leg_b) if group_left else (leg_b, leg_a)
+        grouped_edge, partner_edge = (edge_a, edge_b) if group_left else (edge_b, edge_a)
+
+        accum = {}
+        partner_ops = {}
 
         for ham in engine.hamiltonian.observables:
             if len(ham.indices) != 2:
@@ -211,17 +224,37 @@ def _apply_ham_psi_matvec(
                 op_l_name = ops[1] if flip else ops[0]
                 op_r_name = ops[0] if flip else ops[1]
 
-                # These are (χ,χ) matrices — cheap, already cached
-                op_l = engine._spin_operator_at_edge(edge_a, idx_l, op_l_name)
-                op_r = engine._spin_operator_at_edge(edge_b, idx_r, op_r_name)
+                if group_left:
+                    g_idx, g_name = idx_l, op_l_name
+                    p_idx, p_name = idx_r, op_r_name
+                else:
+                    g_idx, g_name = idx_r, op_r_name
+                    p_idx, p_name = idx_l, op_l_name
 
-                # Apply op_l to leg_a of v (reuses the cached prep for leg_a
-                # across every term that touches this leg -- see above).
-                tmp = _unprep_leg((coef * op_l) @ get_v_prepped(leg_a), leg_a, psi_shape)
-                # Apply op_r to leg_b of tmp. tmp is a fresh per-term
-                # intermediate (not v), so there's nothing to cache here --
-                # full prep+matmul+unprep via _block_ham_matvec is unavoidable.
-                result += _block_ham_matvec(tmp, op_r, leg_b, psi_shape)
+                # `coef * op` always allocates, so the engine's stored
+                # operator is never mutated by the accumulation below.
+                contrib = coef * engine._spin_operator_at_edge(
+                    grouped_edge, g_idx, g_name
+                )
+                key = (p_idx, p_name)
+                if key in accum:
+                    accum[key] = accum[key] + contrib
+                else:
+                    accum[key] = contrib
+                    partner_ops[key] = engine._spin_operator_at_edge(
+                        partner_edge, p_idx, p_name
+                    )
+
+        for key, grouped_op in accum.items():
+            # .T for the index convention (see _block_ham_matvec). Summing
+            # then transposing is identical to transposing then summing, so
+            # the accumulation above can stay untransposed.
+            tmp = _unprep_leg(
+                grouped_op.T @ get_v_prepped(grouped_leg), grouped_leg, psi_shape
+            )
+            # tmp is a fresh per-key intermediate (not v), so there's nothing
+            # to cache on this second application.
+            result += _block_ham_matvec(tmp, partner_ops[key], partner_leg, psi_shape)
 
     return result.ravel()
 
@@ -264,8 +297,9 @@ class TTNHamiltonianOperator(LinearOperator):
         )
 
     def _rmatvec(self, v: np.ndarray) -> np.ndarray:
-        # H is Hermitian so rmatvec = matvec on conjugate
-        return self._matvec(v.conj()).conj()
+        # rmatvec is A^H @ v, and H_eff is Hermitian, so it IS matvec.
+        # (conj(matvec(conj(v))) would be A^T @ v -- equal only for real A.)
+        return self._matvec(v)
 
 
 # ---------------------------------------------------------------------------
@@ -420,83 +454,20 @@ def ttn_eigensolver(
 
 
 # ---------------------------------------------------------------------------
-# 4.  Eliminate block_hamiltonians storage
-#     store them as (χ², χ²) matrices instead of (χ,χ,χ,χ) tensors
-# ---------------------------------------------------------------------------
-
-def _set_block_hamiltonian_as_matrix(engine, tensor_id, ham=None):
-    """
-    Replacement for PhysicsEngine._set_block_hamiltonian.
-    Stores block_hamiltonians[edge] as a 2-D matrix (χ², χ²) instead of
-    a rank-4 tensor (χ,χ,χ,χ), cutting storage by a constant factor and
-    making the matmul path in _compute_block_ham_matrix trivial.
-
-    Memory: χ⁴ × 16 bytes → same asymptotic but avoids redundant tensor
-    network overhead and intermediate copies in ncon.
-    """
-    import tensornetwork as tn
-    import numpy as np
-
-    if ham is not None:
-        bra = engine.psi.tensors[tensor_id]
-        bra_node = tn.Node(bra)
-        ket_node = bra_node.copy(conjugate=True)
-        ham_node = tn.Node(ham)
-        ham_node[0] ^ bra_node[0]
-        ham_node[1] ^ bra_node[1]
-        ham_node[2] ^ ket_node[0]
-        ham_node[3] ^ ket_node[1]
-        block_ham = tn.contractors.auto(
-            [bra_node, ham_node, ket_node],
-            output_edge_order=[bra_node[2], ket_node[2]],
-        )
-        engine.block_hamiltonians[engine.psi.edges[tensor_id][2]] = (
-            block_ham.tensor  # shape (χ, χ) — already a matrix!
-        )
-    else:
-        # Recompute from children — mirrors original _set_block_hamiltonian(ham=None)
-        bra = engine.psi.tensors[tensor_id]
-        bra_tensor = np.zeros(bra.shape, dtype=np.complex128)
-        bra_node = tn.Node(bra)
-        ket_node = bra_node.copy(conjugate=True)
-
-        if engine.psi.edges[tensor_id][0] in engine.block_hamiltonians:
-            bra_tensor += engine._block_ham_psi(
-                bra_node, engine.psi.edges[tensor_id][0], 0
-            )
-        if engine.psi.edges[tensor_id][1] in engine.block_hamiltonians:
-            bra_tensor += engine._block_ham_psi(
-                bra_node, engine.psi.edges[tensor_id][1], 1
-            )
-        bra_tensor += engine._ham_psi(
-            bra_node, engine.psi.edges[tensor_id][:2], [0, 1]
-        )
-
-        bra_h = tn.Node(bra_tensor)
-        bra_h[0] ^ ket_node[0]
-        bra_h[1] ^ ket_node[1]
-        block_ham = tn.contractors.auto(
-            [bra_h, ket_node],
-            output_edge_order=[bra_h[2], ket_node[2]],
-        )
-        engine.block_hamiltonians[engine.psi.edges[tensor_id][2]] = (
-            block_ham.get_tensor()  # shape (χ, χ)
-        )
-
-
-# ---------------------------------------------------------------------------
-# 5.  Monkey-patch helper
+# 4.  Monkey-patch helper
 # ---------------------------------------------------------------------------
 
 def patch_physics_engine(engine):
     """
     Patch an existing PhysicsEngine instance in-place:
 
-      - engine.lanczos()              → ttn_eigensolver()
-      - engine._set_block_hamiltonian → stores (χ,χ) matrices not (χ,χ,χ,χ)
+      - engine.lanczos() → ttn_eigensolver()
 
-    Also purges any already-stored (χ,χ,χ,χ) block Hamiltonians by reshaping
-    them to (χ²,χ²), immediately reclaiming memory.
+    Nothing else is replaced. In particular _set_block_hamiltonian,
+    _set_edge_spin, _ham_psi and _block_ham_psi stay exactly as
+    PhysicsEngine defines them, so the renormalized-operator bookkeeping is
+    shared verbatim between the patched and unpatched paths and the two
+    differ only in how the local two-site eigenproblem is solved.
 
     Call this once after constructing your PhysicsEngine / GroundStateSearch:
 
@@ -504,27 +475,7 @@ def patch_physics_engine(engine):
         patch_physics_engine(gss)
         gss.run(...)
     """
-    import types
-
-    # 1. Replace lanczos
     engine.lanczos = lambda central_tensor_ids, **kw: ttn_eigensolver(
         engine, central_tensor_ids, **kw
     )
-
-    # 2. Replace _set_block_hamiltonian
-    engine._set_block_hamiltonian = lambda tensor_id, ham=None: (
-        _set_block_hamiltonian_as_matrix(engine, tensor_id, ham)
-    )
-
-    # 3. Reshape any already-stored (χ,χ,χ,χ) tensors → (χ²,χ²)
-    freed = 0
-    for k, v in engine.block_hamiltonians.items():
-        if isinstance(v, np.ndarray) and v.ndim == 4:
-            d0, d1 = v.shape[0], v.shape[1]
-            engine.block_hamiltonians[k] = v.reshape(d0 * d1, d0 * d1)
-            freed += 1
-    if freed:
-        print(f"patch_physics_engine: reshaped {freed} block Hamiltonians to matrix form.")
-
-    # print("patch_physics_engine: lanczos → eigsh(LinearOperator), no χ⁴ storage.")
     return engine

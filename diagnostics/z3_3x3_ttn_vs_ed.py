@@ -54,12 +54,27 @@ precision = 3
 CHI = int(os.environ.get("CHI3X3", 9))
 SWEEPS = int(os.environ.get("SWEEPS3X3", 10))
 PATCH = bool(int(os.environ.get("PATCH3X3", 0)))
+# Generated CSV/PNG must not land in the git repo.
+OUT_DIR = os.environ.get(
+    "OUT3X3", "/Users/fradm/Desktop/projects/5_Z3/diagnostics_outputs"
+)
 TAIL = 3  # last-N-sweeps spread used as the error bar
 
+# NG3X3 subsamples the g-grid (evenly, endpoints kept) so a high-SWEEPS run is
+# tractable as a smoke test -- 141 points x 100 sweeps is not.
 g_values = np.linspace(-0.1, -1.5, 141)
+NG = int(os.environ.get("NG3X3", len(g_values)))
+if NG < len(g_values):
+    g_values = g_values[np.linspace(0, len(g_values) - 1, NG).round().astype(int)]
+
+os.makedirs(OUT_DIR, exist_ok=True)
 N = nplaqs(Lx, Ly, shape_)
 
-ED_CSV = os.path.join(os.path.dirname(__file__), "z3_ed_3x3_scan_results.csv")
+ED_CSV = os.path.join(OUT_DIR, "z3_ed_3x3_scan_results.csv")
+if not os.path.exists(ED_CSV):
+    # Older runs wrote it next to this script, before generated data was moved
+    # out of the repo.
+    ED_CSV = os.path.join(os.path.dirname(__file__), "z3_ed_3x3_scan_results.csv")
 ed_lookup = {}
 with open(ED_CSV) as f:
     for row in csv.DictReader(f):
@@ -117,7 +132,7 @@ for i, g in enumerate(g_values):
               f"E_ed={e_ed:.6f}  |diff|={true_err:.2e}  spread={err:.2e}", flush=True)
 
 results = np.array(results)
-out_csv = os.path.join(os.path.dirname(__file__), f"z3_3x3_ttn_vs_ed_chi{CHI}_{patch_label}.csv")
+out_csv = os.path.join(OUT_DIR, f"z3_3x3_ttn_vs_ed_chi{CHI}_sweeps{SWEEPS}_{patch_label}.csv")
 np.savetxt(out_csv, results, delimiter=",",
            header="g,E_ttn,spread_err,E_ed,abs_diff", comments="")
 print(f"\nsaved: {out_csv}")
@@ -143,7 +158,7 @@ ax_diff.legend()
 ax_diff.grid(alpha=0.3, which="both")
 
 fig.tight_layout()
-out_png = os.path.join(os.path.dirname(__file__), f"z3_3x3_ttn_vs_ed_chi{CHI}_{patch_label}.png")
+out_png = os.path.join(OUT_DIR, f"z3_3x3_ttn_vs_ed_chi{CHI}_sweeps{SWEEPS}_{patch_label}.png")
 fig.savefig(out_png, dpi=200)
 plt.close(fig)
 print(f"saved: {out_png}")
