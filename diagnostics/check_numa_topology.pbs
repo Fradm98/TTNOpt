@@ -1,0 +1,54 @@
+#!/bin/bash
+#PBS -N check_numa
+#PBS -l select=1:ncpus=96
+#PBS -l walltime=00:15:00
+#PBS -j oe
+#PBS -o pbs_check_numa.log
+
+# Pure diagnostic job: requests a full node, waits in the queue like any
+# other job (no need to babysit it -- submit and check back later), and
+# once it actually starts, dumps the real NUMA topology + CPU model of
+# whatever node it landed on to a timestamped file you can read any time
+# afterward. Doesn't run any TTNOpt code at all.
+#
+# Submit with: qsub diagnostics/check_numa_topology.pbs
+# Check status while waiting: qstat -u $USER
+# Once done, read the output at the path printed by "saved to:" below.
+
+cd $PBS_O_WORKDIR
+
+OUT_DIR="../5_Z3/logs"
+mkdir -p "$OUT_DIR"
+OUT_FILE="$OUT_DIR/numa_topology_$(date +%Y%m%d_%H%M%S)_$(hostname).txt"
+
+{
+    echo "=== job info ==="
+    echo "hostname: $(hostname)"
+    echo "date: $(date)"
+    echo "PBS_JOBID: ${PBS_JOBID:-n/a}"
+    echo "ncpus requested: 96"
+    echo ""
+
+    echo "=== CPU model ==="
+    lscpu | grep -E "Model name|Vendor ID|CPU family|Model:|Stepping|Socket|Thread|Core" 2>&1
+    echo ""
+
+    echo "=== full lscpu ==="
+    lscpu 2>&1
+    echo ""
+
+    echo "=== numactl --hardware ==="
+    numactl --hardware 2>&1
+    echo ""
+
+    echo "=== numactl --show (this job's own binding) ==="
+    numactl --show 2>&1
+    echo ""
+
+    echo "=== this node's PBS resource record (best effort -- may need to run from a login node instead) ==="
+    pbsnodes -a "$(hostname)" 2>&1 || pbsnodes -a "$(hostname -s)" 2>&1 || echo "(pbsnodes not runnable from inside this job -- check from the login node instead)"
+
+} > "$OUT_FILE" 2>&1
+
+echo "saved to: $PBS_O_WORKDIR/$OUT_FILE"
+echo "(full path: $(cd "$PBS_O_WORKDIR" && cd "$(dirname "$OUT_FILE")" && pwd)/$(basename "$OUT_FILE"))"

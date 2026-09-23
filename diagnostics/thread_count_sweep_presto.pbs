@@ -1,0 +1,85 @@
+#!/bin/bash
+#PBS -N thread_sweep
+#PBS -l select=1:ncpus=32:mem=180gb
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -o pbs_thread_sweep.log
+
+# Empirical thread-count calibration for the hexagon chi=81 workload,
+# SPECIFICALLY on presto's hardware -- do not reuse the Mac's
+# Accelerate-vs-OpenBLAS finding here, it may not transfer (different CPU,
+# different BLAS stack, likely MKL or a distro OpenBLAS rather than
+# Accelerate). Runs the SAME single g-point through ascend(9,27,50) once,
+# then times CHI_TEST_SWEEPS sweeps at CHI_TEST for each thread count in
+# THREAD_COUNTS, sequentially (one at a time, so timings aren't contended
+# by each other) -- each config starts from the SAME just-ascended
+# checkpoint so the comparison is apples to apples.
+#
+# Defaults to CHI_TEST=50 (much cheaper than 81 -- ~1500s/sweep on the Mac,
+# vs ~20000s/sweep at chi=81) to make a multi-config sweep tractable. Once
+# you see which thread count wins at chi=50, optionally rerun with
+# CHI_TEST=81 CHI_TEST_SWEEPS=1 to confirm it holds at the real target
+# scale before committing it to the production batch config.
+#
+# Submit with: qsub diagnostics/thread_count_sweep_presto.pbs
+
+cd $PBS_O_WORKDIR
+
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+DRIVE_PATH="/home/fradm/projects/5_Z3_thread_sweep"   # isolated -- do not touch the real scan's tensors.hdf5
+
+THREAD_COUNTS="1 4 8 16 32"
+CHI_TEST=50
+CHI_TEST_SWEEPS=3
+
+mkdir -p "$DRIVE_PATH/logs"
+
+echo "Job started on $(hostname) at $(date)"
+echo "cpuset assigned by PBS:"; numactl --show 2>/dev/null | grep -E "cpubind|nodebind|physcpubind"
+
+# Step 1: build the shared ascend(9,27,50) checkpoint ONCE, cheap, default
+# thread count (doesn't matter much -- chi=9/27 sweeps are fast regardless).
+"$PYTHON" -u -m pipeline.g_sweep \
+    --lx 5 --ly 9 --shape hexagon \
+    --g-min 1.5 --g-max 1.5 --n-g 1 \
+    --chis 9 27 "$CHI_TEST" \
+    --sweeps-ascend 3 --lanczos-tol-ascend 1e-6 --sweeps-converge "$CHI_TEST_SWEEPS" --sweeps-descend 3 \
+    --patched \
+    --drive-path "$DRIVE_PATH" \
+    > "$DRIVE_PATH/logs/build_checkpoint.log" 2>&1
+
+echo "checkpoint built at $(date)"
+
+# Step 2: for each thread count, reload the chi=CHI_TEST checkpoint (via
+# g_descend_existing's same-chi reload trick -- see pipeline/g_descend_
+# existing.py's docstring) and time CHI_TEST_SWEEPS fresh sweeps at that
+# SAME chi, sequentially, one thread count at a time.
+for threads in $THREAD_COUNTS; do
+    echo ""
+    echo "=== threads=$threads ==="
+    export OMP_NUM_THREADS=$threads
+    export MKL_NUM_THREADS=$threads
+    export OPENBLAS_NUM_THREADS=$threads
+
+    log="$DRIVE_PATH/logs/threads_${threads}.log"
+    start=$(date +%s)
+    "$PYTHON" -u -m pipeline.g_descend_existing \
+        --g-values -1.500 \
+        --source-chi "$CHI_TEST" --descend-chis "$CHI_TEST" --sweeps-descend "$CHI_TEST_SWEEPS" \
+        --lx 5 --ly 9 --shape hexagon \
+        --patched \
+        --drive-path "$DRIVE_PATH" \
+        > "$log" 2>&1
+    end=$(date +%s)
+    total=$((end - start))
+    per_sweep=$(python3 -c "print(f'{$total/$CHI_TEST_SWEEPS:.1f}')")
+    line="threads=$threads: ${total}s total for $CHI_TEST_SWEEPS sweeps (${per_sweep}s/sweep)"
+    echo "$line -- see $log"
+    echo "$line" >> "$DRIVE_PATH/logs/summary.txt"
+done
+
+echo ""
+echo "Job finished at $(date)"
+echo "Summary:"
+cat "$DRIVE_PATH/logs/summary.txt" 2>/dev/null
+echo "DONE"

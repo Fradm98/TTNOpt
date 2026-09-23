@@ -1,0 +1,136 @@
+#!/bin/bash
+#PBS -N g_sweep_parallel
+#PBS -l select=1:ncpus=96:mem=350gb
+#PBS -l walltime=48:00:00
+#PBS -j oe
+#PBS -o pbs_g_sweep_parallel.log
+
+# Batches an independent-per-g cold-start g-scan across MULTIPLE workers
+# running CONCURRENTLY on one node, each pinned to its own NUMA domain via
+# numactl -- so N independent workers share the node's cores/NUMA domains
+# instead of one process trying (and, per our local findings, often
+# FAILING) to get a speedup from more threads within a single computation.
+#
+# Every parameter that matters for tuning is a plain shell variable below --
+# fill in N_WORKERS / CORES_PER_WORKER / THREADS_PER_WORKER once you have
+# the real NUMA topology from `numactl --hardware` inside a full-node
+# interactive session (see the presto NUMA investigation). Nothing here
+# assumes a specific topology; the numactl binding is generated from these
+# variables.
+#
+# Each worker gets a CONTIGUOUS slice of the full g-range (so --warm-start-g
+# within a worker, if enabled, only warm-starts within that worker's own
+# slice -- matching the "batches with warm start, batches in parallel"
+# design). Workers are otherwise fully independent -- no shared state
+# beyond tensors.hdf5, which is safe for concurrent writes (see
+# Z3_funcs/hdf5_manager.py's _open_h5 retry-on-lock).
+#
+# Submit with: qsub pipeline/g_sweep_presto_parallel.pbs
+
+cd $PBS_O_WORKDIR
+
+# ---------------------------------------------------------------------------
+# TUNABLES -- this is what you vary between runs to find the sweet spot.
+# ---------------------------------------------------------------------------
+
+# How many g-sweep workers run concurrently. Sensible starting point: one
+# worker per NUMA domain on the node (so each worker's memory traffic stays
+# local). Adjust once `numactl --hardware` tells you the real domain count.
+N_WORKERS=4
+
+# NUMA node id to bind each worker to, one entry per worker (must have
+# exactly N_WORKERS entries). Fill in from `numactl --hardware`'s node list
+# -- e.g. on a 4-domain node this is typically (0 1 2 3).
+NUMA_NODES=(0 1 2 3)
+
+# Cores per worker (informational + used to compute #PBS resource request
+# above -- update the "select=1:ncpus=..." line to N_WORKERS*CORES_PER_WORKER
+# if you change this). Does NOT restrict the worker to fewer cores than its
+# NUMA domain has -- numactl --cpunodebind binds to the WHOLE domain's cores,
+# this is just bookkeeping for sizing the PBS request.
+CORES_PER_WORKER=24
+
+# Threads each worker's own BLAS/LAPACK backend is told to use. This is the
+# other axis worth sweeping -- our local Mac testing found MORE threads can
+# make a many-small-operations workload SLOWER (thread-spawn/sync overhead
+# per call), not faster, so don't assume higher is better here either.
+# Try e.g. 1, 4, CORES_PER_WORKER and compare wall time per sweep.
+THREADS_PER_WORKER=4
+
+# ---------------------------------------------------------------------------
+# g-scan definition -- same meaning as pipeline.g_sweep's own CLI.
+# ---------------------------------------------------------------------------
+G_MIN=0.1
+G_MAX=1.5
+N_G_TOTAL=15
+CHIS="9 18 27"
+SWEEPS_ASCEND=3
+SWEEPS_CONVERGE=10
+SWEEPS_DESCEND=10
+LX=5
+LY=5
+SHAPE=parallelogram
+ENGINE_FLAG="--patched"     # or --unpatched
+WARM_START_FLAG=""          # set to "--warm-start-g" to warm-start WITHIN each worker's own slice
+
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+DRIVE_PATH="/home/fradm/projects/5_Z3"
+
+mkdir -p ../5_Z3/logs
+
+echo "Job started on $(hostname) at $(date)"
+echo "N_WORKERS=$N_WORKERS NUMA_NODES=${NUMA_NODES[*]} THREADS_PER_WORKER=$THREADS_PER_WORKER"
+
+if [ "${#NUMA_NODES[@]}" -ne "$N_WORKERS" ]; then
+    echo "ERROR: NUMA_NODES has ${#NUMA_NODES[@]} entries, need N_WORKERS=$N_WORKERS. Fix the array above." >&2
+    exit 1
+fi
+
+# Split [G_MIN, G_MAX] (N_G_TOTAL points total) into N_WORKERS CONTIGUOUS,
+# roughly-equal slices. Uses python for correct float/remainder handling
+# rather than fragile shell arithmetic.
+read -ra SLICE_MINS < <("$PYTHON" -c "
+import numpy as np
+g = np.linspace($G_MIN, $G_MAX, $N_G_TOTAL)
+idx = np.array_split(np.arange(len(g)), $N_WORKERS)
+print(' '.join(f'{g[i[0]]:.6f}' for i in idx if len(i)))
+")
+read -ra SLICE_MAXS < <("$PYTHON" -c "
+import numpy as np
+g = np.linspace($G_MIN, $G_MAX, $N_G_TOTAL)
+idx = np.array_split(np.arange(len(g)), $N_WORKERS)
+print(' '.join(f'{g[i[-1]]:.6f}' for i in idx if len(i)))
+")
+read -ra SLICE_NS < <("$PYTHON" -c "
+import numpy as np
+idx = np.array_split(np.arange($N_G_TOTAL), $N_WORKERS)
+print(' '.join(str(len(i)) for i in idx if len(i)))
+")
+
+pids=()
+for i in "${!SLICE_MINS[@]}"; do
+    node=${NUMA_NODES[$i]}
+    gmin=${SLICE_MINS[$i]}
+    gmax=${SLICE_MAXS[$i]}
+    ng=${SLICE_NS[$i]}
+    log="../5_Z3/logs/g_sweep_parallel_worker${i}_node${node}.log"
+    echo "worker $i: numa node $node, g in [$gmin, $gmax] ($ng points), threads=$THREADS_PER_WORKER -> $log"
+
+    OMP_NUM_THREADS=$THREADS_PER_WORKER \
+    MKL_NUM_THREADS=$THREADS_PER_WORKER \
+    OPENBLAS_NUM_THREADS=$THREADS_PER_WORKER \
+    numactl --cpunodebind="$node" --membind="$node" \
+    "$PYTHON" -u -m pipeline.g_sweep \
+        --lx "$LX" --ly "$LY" --shape "$SHAPE" \
+        --g-min "$gmin" --g-max "$gmax" --n-g "$ng" \
+        --chis $CHIS \
+        --sweeps-ascend "$SWEEPS_ASCEND" --sweeps-converge "$SWEEPS_CONVERGE" --sweeps-descend "$SWEEPS_DESCEND" \
+        $ENGINE_FLAG $WARM_START_FLAG \
+        --drive-path "$DRIVE_PATH" \
+        > "$log" 2>&1 &
+    pids+=($!)
+done
+
+echo "launched ${#pids[@]} workers: ${pids[*]}"
+wait
+echo "Job finished at $(date)"
