@@ -11,12 +11,14 @@
 # instead of one process trying (and, per our local findings, often
 # FAILING) to get a speedup from more threads within a single computation.
 #
-# Every parameter that matters for tuning is a plain shell variable below --
-# fill in N_WORKERS / CORES_PER_WORKER / THREADS_PER_WORKER once you have
-# the real NUMA topology from `numactl --hardware` inside a full-node
-# interactive session (see the presto NUMA investigation). Nothing here
-# assumes a specific topology; the numactl binding is generated from these
-# variables.
+# Every parameter that matters for tuning is a plain shell variable below.
+# N_WORKERS/NUMA_NODES/CORES_PER_WORKER below are CONFIRMED, not guessed --
+# from diagnostics/check_numa_topology.pbs's actual output on presto
+# (node04, 2026-09-23): Intel Xeon Platinum 9242, 96 cores/node = 4 NUMA
+# domains x 24 cores each (0-23, 24-47, 48-71, 72-95), distance 10 local /
+# 21 uniform remote (not tiered). If you run this on a DIFFERENT node type
+# or cluster, re-verify with that script first -- don't assume this layout
+# transfers.
 #
 # Each worker gets a CONTIGUOUS slice of the full g-range (so --warm-start-g
 # within a worker, if enabled, only warm-starts within that worker's own
