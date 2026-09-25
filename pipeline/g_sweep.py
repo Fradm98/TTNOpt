@@ -282,6 +282,8 @@ def main():
     p.add_argument("--lanczos-maxiter-ascend", type=int, default=None,
                     help="cap eigensolver iterations during the ascend stages only "
                          "(patched runs only)")
+    p.add_argument("--energy-convergence-threshold", type=float, default=1e-10)
+    p.add_argument("--entanglement-convergence-threshold", type=float, default=1e-10)
     p.add_argument("--device", choices=list(DEVICE_DRIVE_PATHS), default=DEFAULT_DEVICE)
     p.add_argument("--drive-path", default=None,
                     help="override the path derived from --device")
@@ -310,6 +312,8 @@ def main():
         unpatched=args.unpatched, warm_start_g=args.warm_start_g, drive_path=drive_path,
         lanczos_tol_ascend=args.lanczos_tol_ascend,
         lanczos_maxiter_ascend=args.lanczos_maxiter_ascend,
+        energy_convergence_threshold=args.energy_convergence_threshold,
+        entanglement_convergence_threshold=args.entanglement_convergence_threshold,
     )
 
 

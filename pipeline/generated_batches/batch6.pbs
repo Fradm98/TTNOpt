@@ -1,0 +1,29 @@
+#!/bin/bash
+#PBS -N g_sweep_b6
+#PBS -l select=1:ncpus=8:mem=130gb
+#PBS -l walltime=144:00:00
+#PBS -j oe
+#PBS -o pbs_g_sweep_batch6.log
+
+cd $PBS_O_WORKDIR
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+export OMP_NUM_THREADS=8
+export MKL_NUM_THREADS=8
+export OPENBLAS_NUM_THREADS=8
+mkdir -p ../5_Z3/logs
+
+echo "batch 6: g in [0.700000, 0.700000] (1 points), threads=8, node=$(hostname)"
+echo "cpuset actually assigned by PBS:"; numactl --show 2>/dev/null | grep -E "cpubind|nodebind" || true
+
+"$PYTHON" -u -m pipeline.g_sweep \
+    --lx 5 --ly 9 --shape hexagon \
+    --g-min 0.700000 --g-max 0.700000 --n-g 1 \
+    --chis 9 27 50 81 \
+    --sweeps-ascend 3 --lanczos-tol-ascend 1e-6 \
+    --sweeps-converge 40 --sweeps-descend 25 20 10 \
+    --entanglement-convergence-threshold 1e-8 \
+    --patched  \
+    --drive-path /home/fradm/projects/5_Z3 \
+    > ../5_Z3/logs/g_sweep_batch6.log 2>&1
+
+echo "batch 6 finished at $(date)"
