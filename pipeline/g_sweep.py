@@ -194,23 +194,25 @@ def run_g_sweep(
 
     pbar = tqdm(g_order[resume_start_idx:], dynamic_ncols=True)
     for g in pbar:
-        # A chi_max checkpoint for THIS g means either (a) the chi_max converge
-        # stage was interrupted mid-way (GroundStateSearch.run()'s
-        # checkpoint_callback saves it every sweep -- see ground_state_search.py)
-        # and never got as far as chis[0] (checked above / at loop top), or
-        # (b) chi_max fully converged and a later descend stage was
-        # interrupted -- in which case this resumes chi_max from its own
-        # already-converged state, which just re-confirms convergence in a
-        # handful of sweeps rather than the full budget. Either way, cheaper
-        # than redoing the ascend ladder from scratch, and takes priority over
-        # warm-starting from a neighboring g's checkpoint.
-        resume_own_chi_max = tensor_exists(
-            init_tensor_file, shape, Lx, Ly, bound_state, R, g, precision,
-            chis[-1], chargesx=chargesx, chargesy=chargesy,
-        )
-        use_warm_start = warm_start_g and previous_g is not None and not resume_own_chi_max
-        if resume_own_chi_max:
-            pbar.set_description(f"g={g:.{precision}f} (resuming own chi={chis[-1]} checkpoint)")
+        # Find the LARGEST chi already checkpointed for this g -- not just
+        # chi_max. Every stage's end-of-stage save (ascend stages too, not
+        # just chi_max's per-sweep one) leaves a usable tensor, so an
+        # interruption during, say, the chi_max converge stage still leaves
+        # chi=9/27/50's ascend results on disk. Only checking chi_max would
+        # miss those and redo the WHOLE ascend ladder from a random tree --
+        # cheap per stage, but still real wasted time, and pointless when the
+        # work is already sitting in tensors.hdf5. Search from chi_max down
+        # so a fully/partially done chi_max always wins over an older,
+        # smaller ascend checkpoint.
+        resume_idx = None
+        for k in range(len(chis) - 1, -1, -1):
+            if tensor_exists(init_tensor_file, shape, Lx, Ly, bound_state, R, g, precision,
+                              chis[k], chargesx=chargesx, chargesy=chargesy):
+                resume_idx = k
+                break
+        use_warm_start = warm_start_g and previous_g is not None and resume_idx is None
+        if resume_idx is not None:
+            pbar.set_description(f"g={g:.{precision}f} (resuming own chi={chis[resume_idx]} checkpoint)")
         else:
             pbar.set_description(
                 f"g={g:.{precision}f} (" + (f"warm from g={previous_g:.{precision}f}" if use_warm_start else "cold start") + ")"
@@ -232,15 +234,34 @@ def run_g_sweep(
             "unpatched": unpatched,
         }
 
-        if resume_own_chi_max:
+        # The full cold-start ladder, stage by stage -- chis[0..-1] (ascend,
+        # then chi_max/converge) followed by descend_chis. A resume just
+        # slices into this same list/schedule rather than building a
+        # separate one, so a resumed run's remaining stages use exactly the
+        # sweep counts/tolerances they'd have had in an uninterrupted run.
+        full_chis = chis + descend_chis
+        full_sweeps = [sweeps_ascend] * (len(chis) - 1) + [sweeps_converge] + sweeps_descend_list
+        ascend_tol = None if unpatched else lanczos_tol_ascend
+        ascend_maxiter = None if unpatched else lanczos_maxiter_ascend
+        n_rest = 1 + len(descend_chis)
+        full_tol = [ascend_tol] * (len(chis) - 1) + [None] * n_rest
+        full_maxiter = [ascend_maxiter] * (len(chis) - 1) + [None] * n_rest
+
+        if resume_idx is not None:
+            # Resuming AT chi_max (resume_idx == len(chis)-1) re-includes it
+            # with a fresh sweeps_converge budget (it may have only been
+            # partway converged); resuming at a smaller already-done ascend
+            # chi skips straight to the NEXT stage instead of redoing it (an
+            # ascend stage's fixed few sweeps don't benefit from a repeat).
+            resume_pos = min(resume_idx + 1, len(chis) - 1)
             numerics_dict["init_tree"] = 3
             numerics_dict["init_tensor_file"] = init_tensor_file
             numerics_dict["init_g"] = g
-            numerics_dict["init_chi"] = chis[-1]
-            numerics_dict["max_bond_dimensions"] = [chis[-1]] + descend_chis
-            numerics_dict["max_num_sweeps"] = [sweeps_converge] + sweeps_descend_list
-            numerics_dict["lanczos_tol"] = [None] * len(numerics_dict["max_bond_dimensions"])
-            numerics_dict["lanczos_maxiter"] = [None] * len(numerics_dict["max_bond_dimensions"])
+            numerics_dict["init_chi"] = chis[resume_idx]
+            numerics_dict["max_bond_dimensions"] = full_chis[resume_pos:]
+            numerics_dict["max_num_sweeps"] = full_sweeps[resume_pos:]
+            numerics_dict["lanczos_tol"] = full_tol[resume_pos:]
+            numerics_dict["lanczos_maxiter"] = full_maxiter[resume_pos:]
         elif use_warm_start:
             numerics_dict["init_tree"] = 3
             numerics_dict["init_tensor_file"] = init_tensor_file
@@ -252,16 +273,10 @@ def run_g_sweep(
             numerics_dict["lanczos_maxiter"] = [None] * len(numerics_dict["max_bond_dimensions"])
         else:
             numerics_dict["init_tree"] = 2
-            numerics_dict["max_bond_dimensions"] = chis + descend_chis
-            numerics_dict["max_num_sweeps"] = (
-                [sweeps_ascend] * (len(chis) - 1) + [sweeps_converge] + sweeps_descend_list
-            )
-            n_ascend = len(chis) - 1
-            n_rest = 1 + len(descend_chis)
-            ascend_tol = None if unpatched else lanczos_tol_ascend
-            ascend_maxiter = None if unpatched else lanczos_maxiter_ascend
-            numerics_dict["lanczos_tol"] = [ascend_tol] * n_ascend + [None] * n_rest
-            numerics_dict["lanczos_maxiter"] = [ascend_maxiter] * n_ascend + [None] * n_rest
+            numerics_dict["max_bond_dimensions"] = full_chis
+            numerics_dict["max_num_sweeps"] = full_sweeps
+            numerics_dict["lanczos_tol"] = full_tol
+            numerics_dict["lanczos_maxiter"] = full_maxiter
 
         input_dict = {
             "system": {
