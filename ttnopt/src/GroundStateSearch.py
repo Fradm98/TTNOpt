@@ -1,6 +1,6 @@
 import time
 from copy import deepcopy
-from typing import Dict, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 import tensornetwork as tn
@@ -92,6 +92,7 @@ class GroundStateSearch(PhysicsEngine):
         lanczos_ncv: int = None,
         reference_edge_id: int = None,
         diagnostic_edges: list = None,
+        checkpoint_callback: Optional[Callable[[int], None]] = None,
     ):
         """Run DMRG algorithm.
 
@@ -135,6 +136,19 @@ class GroundStateSearch(PhysicsEngine):
                 cost. Only opt_structure=0 is supported for this (matches
                 the only opt_structure value used anywhere in this project);
                 edge_order is not accounted for otherwise.
+            checkpoint_callback (callable, optional): called with the
+                1-based sweep number after EVERY completed sweep (not just
+                every 3rd, unlike the convergence-history diffing). self.psi
+                already reflects that sweep's updated tensors (it's mutated
+                in place during the sweep) and self.convergence_history
+                already has that sweep's row appended (once sweep_num > 2),
+                so the callback can persist both without any extra state
+                threaded through. Meant for long max_num_sweep stages (the
+                chi_max converge stage) where losing the whole stage to a
+                walltime/OOM kill is expensive -- see ground_state_search.py's
+                caller for what it actually writes. None (default): no
+                per-sweep persistence, matching the original behavior where
+                only the caller's post-run() save applies.
         """
         lanczos_kwargs = {}
         if lanczos_tol is not None:
@@ -474,6 +488,9 @@ class GroundStateSearch(PhysicsEngine):
                     )
                 if converged_this_sweep:
                     converged_num += 1
+
+            if checkpoint_callback is not None:
+                checkpoint_callback(sweep_num)
 
         self.energy = _energy_at_edge
         self.entanglement = _ee_at_edge

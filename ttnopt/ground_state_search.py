@@ -369,13 +369,60 @@ def ground_state_search():
                   "(patch_physics_engine() skipped).")
         else:
             patch_physics_engine(gss)
+    # The stage whose max_bond_dim equals the global max across this g-point's
+    # whole ladder -- bond dim only goes up then down (or starts at the top,
+    # for a warm/resumed start), so this identifies the expensive "converge"
+    # stage regardless of which index it falls at.
+    chi_max_global = max(numerics.max_bond_dimensions)
+
     for i, (max_bond_dim, max_num_sweep) in enumerate(
         zip(numerics.max_bond_dimensions, numerics.max_num_sweeps)
     ):
         gss.max_bond_dim = max_bond_dim
-        # verbose/lanczos_tol/lanczos_maxiter only exist on GroundStateSearch.run()
-        # (dense/LinOp path) -- GroundStateSearchSparse.run() (U1 path) has neither,
-        # so only pass them through when we're not on that path.
+        path_ = path / f"run_chi-{max_bond_dim}"
+        os.makedirs(path_, exist_ok=True)
+
+        # Per-sweep checkpointing, chi_max stage only (smaller chis' stages
+        # are cheap enough that redoing one from scratch after a kill is not
+        # worth the extra I/O -- see the caller's request). Overwrites the
+        # SAME tensors.hdf5 entry the end-of-stage save below would
+        # eventually write anyway, so a clean finish just means the last
+        # per-sweep write and the end-of-stage write are identical -- no
+        # extra checkpoint files, no extra bookkeeping. convergence.csv is
+        # re-dumped in full each call (the list is tiny -- tens of rows).
+        checkpoint_callback = None
+        if not u1_symmetry and save_tensors and max_bond_dim == chi_max_global:
+            def checkpoint_callback(sweep_num, path_=path_):
+                try:
+                    ten_file = config.output.save_tensors + "/tensors.hdf5"
+                    save_tensor(
+                        ten_file,
+                        config.system.shape,
+                        config.system.Lx,
+                        config.system.Ly,
+                        config.system.bound_state,
+                        config.system.R,
+                        config.system.g,
+                        config.system.precision,
+                        gss.max_bond_dim,
+                        gss.psi,
+                        chargesx=config.system.chargesx,
+                        chargesy=config.system.chargesy,
+                    )
+                    if gss.convergence_history:
+                        pd.DataFrame(gss.convergence_history).to_csv(
+                            path_ / "convergence.csv", header=True, index=None
+                        )
+                except Exception as exc:
+                    print(
+                        f"⚠️  per-sweep checkpoint failed at sweep {sweep_num}: {exc}",
+                        flush=True,
+                    )
+
+        # verbose/lanczos_tol/lanczos_maxiter/checkpoint_callback only exist on
+        # GroundStateSearch.run() (dense/LinOp path) -- GroundStateSearchSparse.run()
+        # (U1 path) has none of these, so only pass them through when we're not
+        # on that path.
         dense_only_kwargs = (
             {}
             if u1_symmetry
@@ -383,6 +430,7 @@ def ground_state_search():
                 "verbose": verbose_sweeps,
                 "lanczos_tol": lanczos_tol_per_stage[i],
                 "lanczos_maxiter": lanczos_maxiter_per_stage[i],
+                "checkpoint_callback": checkpoint_callback,
             }
         )
         if i == 0:
@@ -464,8 +512,6 @@ def ground_state_search():
         df["entanglement"] = [gss.entanglement[k] for k in all_keys]
         df["error"] = [gss.error[k] for k in all_keys]
 
-        path_ = path / f"run_chi-{max_bond_dim}"
-        os.makedirs(path_, exist_ok=True)
         df.to_csv(path_ / "basic.csv", header=True, index=None)
         np.savetxt(path_ / "graph.dat", gss.psi.edges, fmt="%d", delimiter=",")
 
@@ -550,8 +596,19 @@ def ground_state_search():
                         config.system.R, 
                         config.system.g, 
                         config.system.precision, 
-                        gss.max_bond_dim, 
+                        gss.max_bond_dim,
                         gss.psi,
                         chargesx=config.system.chargesx,
                         chargesy=config.system.chargesy)
+
+    # Unambiguous "this g-point's whole ladder finished" marker. Do NOT use
+    # tensor_exists(chis[0]) for this (as the caller used to) -- chis[0]'s
+    # tensors.hdf5 entry is written TWICE (once cheaply by the ascend stage,
+    # then again, refined, by the final descend stage) at the SAME (g, chi)
+    # key, so its mere existence can't distinguish "ascend just started" from
+    # "the whole g-point is done". That ambiguity meant a g-point interrupted
+    # anywhere after its ascend stage (e.g. mid chi_max, the expensive stage
+    # this file's per-sweep checkpointing exists to protect) would be
+    # silently treated as fully finished and skipped on the next resume.
+    (path / "ALL_STAGES_DONE").touch()
     return 0

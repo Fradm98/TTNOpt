@@ -172,11 +172,18 @@ def run_g_sweep(
     g_order = sorted(g_values, key=lambda g: -abs(g))
     descend_chis = chis[-2::-1]
 
+    # Checks each g-point's own ALL_STAGES_DONE marker (written by
+    # ground_state_search.py only after its entire stage ladder -- ascend,
+    # converge, descend -- returns), NOT tensor_exists(chis[0]). chis[0]'s
+    # tensors.hdf5 entry is written twice (cheaply by ascend, then again by
+    # the final descend stage) at the same (g, chi) key, so its existence
+    # alone can't tell "ascend just started" from "this g-point is done" --
+    # it would wrongly skip-as-finished a g-point interrupted mid chi_max.
     resume_start_idx = 0
     previous_g = None
     for g in g_order:
-        if tensor_exists(init_tensor_file, shape, Lx, Ly, bound_state, R, g, precision,
-                          chis[0], chargesx=chargesx, chargesy=chargesy):
+        run_folder = f"{folder}/g_{g:.{precision}f}"
+        if os.path.exists(os.path.join(run_folder, "ALL_STAGES_DONE")):
             resume_start_idx += 1
             previous_g = g
         else:
@@ -187,10 +194,27 @@ def run_g_sweep(
 
     pbar = tqdm(g_order[resume_start_idx:], dynamic_ncols=True)
     for g in pbar:
-        use_warm_start = warm_start_g and previous_g is not None
-        pbar.set_description(
-            f"g={g:.{precision}f} (" + (f"warm from g={previous_g:.{precision}f}" if use_warm_start else "cold start") + ")"
+        # A chi_max checkpoint for THIS g means either (a) the chi_max converge
+        # stage was interrupted mid-way (GroundStateSearch.run()'s
+        # checkpoint_callback saves it every sweep -- see ground_state_search.py)
+        # and never got as far as chis[0] (checked above / at loop top), or
+        # (b) chi_max fully converged and a later descend stage was
+        # interrupted -- in which case this resumes chi_max from its own
+        # already-converged state, which just re-confirms convergence in a
+        # handful of sweeps rather than the full budget. Either way, cheaper
+        # than redoing the ascend ladder from scratch, and takes priority over
+        # warm-starting from a neighboring g's checkpoint.
+        resume_own_chi_max = tensor_exists(
+            init_tensor_file, shape, Lx, Ly, bound_state, R, g, precision,
+            chis[-1], chargesx=chargesx, chargesy=chargesy,
         )
+        use_warm_start = warm_start_g and previous_g is not None and not resume_own_chi_max
+        if resume_own_chi_max:
+            pbar.set_description(f"g={g:.{precision}f} (resuming own chi={chis[-1]} checkpoint)")
+        else:
+            pbar.set_description(
+                f"g={g:.{precision}f} (" + (f"warm from g={previous_g:.{precision}f}" if use_warm_start else "cold start") + ")"
+            )
 
         run_folder = f"{folder}/g_{g:.{precision}f}"
         os.makedirs(run_folder, exist_ok=True)
@@ -208,7 +232,16 @@ def run_g_sweep(
             "unpatched": unpatched,
         }
 
-        if use_warm_start:
+        if resume_own_chi_max:
+            numerics_dict["init_tree"] = 3
+            numerics_dict["init_tensor_file"] = init_tensor_file
+            numerics_dict["init_g"] = g
+            numerics_dict["init_chi"] = chis[-1]
+            numerics_dict["max_bond_dimensions"] = [chis[-1]] + descend_chis
+            numerics_dict["max_num_sweeps"] = [sweeps_converge] + sweeps_descend_list
+            numerics_dict["lanczos_tol"] = [None] * len(numerics_dict["max_bond_dimensions"])
+            numerics_dict["lanczos_maxiter"] = [None] * len(numerics_dict["max_bond_dimensions"])
+        elif use_warm_start:
             numerics_dict["init_tree"] = 3
             numerics_dict["init_tensor_file"] = init_tensor_file
             numerics_dict["init_g"] = previous_g
