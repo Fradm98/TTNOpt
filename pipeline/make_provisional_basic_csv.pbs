@@ -1,0 +1,133 @@
+#!/bin/bash
+#PBS -N provisional_basic_csv
+#PBS -l select=1:ncpus=8:mem=200gb
+#PBS -l walltime=100:00:00
+#PBS -j oe
+#PBS -o pbs_provisional_basic_csv.log
+
+# For g-points where a chi stage was killed mid-converge (chi judged too
+# small, or just manually stopped) and so never reached the END of that
+# stage -- basic.csv/convergence.csv only get written there (see
+# ttnopt/ground_state_search.py), never mid-sweep -- this AUTO-DETECTS,
+# for each g in G_VALUES, which chi among the candidate ladder CHIS
+# already has a saved tensor in tensors.hdf5 but is STILL MISSING its
+# basic.csv, and fixes only those via g_descend_existing.py's "same-chi
+# reload" trick (source_chi == target chi, no truncation, a few more
+# sweeps at that SAME chi just to populate gss.energy/entanglement/error
+# so basic.csv gets written).
+#
+# Why auto-detect rather than you specifying one chi per g: under a
+# normal interrupted-chi_max scenario, chi=9/27/50's ascend stages
+# already completed and wrote their OWN basic.csv before the converge
+# stage ever started -- only chi_max is actually missing one. You don't
+# need to know in advance which single chi broke for which g; the script
+# finds it per g from CHIS, the same flat candidate list for everyone.
+#
+# NOT a pure read-out: those extra sweeps still do real local
+# optimization at every bond, so the result is a slightly further-
+# refined state, not bit-identical to the exact moment you killed it --
+# should be a negligible perturbation if the state was anywhere close to
+# settled.
+#
+# mem=200gb is a rough pad above the observed ~130gb at chi=81 -- bump it
+# if CHIS includes 128, which hasn't been separately measured.
+#
+# Submit with: qsub pipeline/make_provisional_basic_csv.pbs
+
+cd $PBS_O_WORKDIR
+
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+DRIVE_PATH="/home/fradm/projects/5_Z3"
+LX=5
+LY=9
+SHAPE=hexagon
+PRECISION=3
+SWEEPS=1          # 1 = cheapest, gives basic.csv only (unconditional on
+                  # any stage completing). 3+ also gives convergence.csv
+                  # (needs >=3 sweeps of history for any diff row) at the
+                  # cost of 2 extra REAL sweeps per point -- not free at
+                  # chi=81/128 on this lattice, so raise it deliberately,
+                  # not by default.
+
+# Candidate chis to check every g-point against (auto-detection finds
+# which one(s) actually need fixing per g).
+CHIS=(9 27 50 81)
+
+# g-values to check. Leave EMPTY to auto-discover every g currently
+# present in tensors.hdf5 for this shape/Lx/Ly (vacuum sector) -- no need
+# to track which points are affected by hand. Only set this if you want
+# to restrict the scan to specific g-values instead.
+G_VALUES=()
+
+export OMP_NUM_THREADS=8
+export MKL_NUM_THREADS=8
+export OPENBLAS_NUM_THREADS=8
+
+mkdir -p ../5_Z3/logs
+
+echo "Job started on $(hostname) at $(date)"
+echo "Detecting which (g, chi) pairs have a saved tensor but no basic.csv..."
+
+# Pre-expand into plain scalar variables before handing to python3 -c --
+# interpolating the array expansion directly inline inside the -c string
+# truncates the script (python3 -c mishandles it, confirmed empirically;
+# assigning to a variable first does not).
+G_VALUES_PY="[${G_VALUES[@]/%/,}]"
+CHIS_PY="[${CHIS[@]/%/,}]"
+
+DETECT_SPEC=$("$PYTHON" -c "
+import h5py
+from pipeline.g_sweep import get_folder
+from Z3_funcs.hdf5_manager import tensor_exists, _ten_base_path
+import os
+
+drive_path = '$DRIVE_PATH'
+Lx, Ly, shape, precision = $LX, $LY, '$SHAPE', $PRECISION
+g_values = $G_VALUES_PY
+chis = $CHIS_PY
+
+if not g_values:
+    # Auto-discover every g currently in tensors.hdf5 for this shape/Lx/Ly
+    # (vacuum sector) instead of requiring a hand-maintained list.
+    base = _ten_base_path(shape, Lx, Ly, None, None)
+    with h5py.File(f'{drive_path}/tensors.hdf5', 'r') as f:
+        grp = f.get(base)
+        g_values = sorted(float(k[2:]) for k in (grp.keys() if grp else []) if k.startswith('g_'))
+    print(f'auto-discovered {len(g_values)} g-values: {g_values}', file=__import__('sys').stderr)
+
+folder, chargesx, chargesy = get_folder(drive_path, Lx, Ly, shape, None, None, None, None)
+init_tensor_file = f'{drive_path}/tensors.hdf5'
+
+for g in g_values:
+    for chi in chis:
+        has_tensor = tensor_exists(init_tensor_file, shape, Lx, Ly, None, None, g, precision, chi,
+                                    chargesx=chargesx, chargesy=chargesy)
+        basic_csv = f'{folder}/g_{g:.{precision}f}/run_chi-{chi}/basic.csv'
+        if has_tensor and not os.path.exists(basic_csv):
+            print(f'{g:.{precision}f} {chi}')
+")
+
+if [ -z "$DETECT_SPEC" ]; then
+    echo "No (g, chi) pairs found needing a provisional basic.csv -- nothing to do."
+    echo "DONE"
+    exit 0
+fi
+
+echo "Pairs needing a fix:"
+echo "$DETECT_SPEC"
+echo ""
+
+while read -r g chi; do
+    log="../5_Z3/logs/provisional_basic_csv_g${g}_chi${chi}.log"
+    echo "=== g=$g, chi=$chi -- see $log ($(date)) ==="
+    "$PYTHON" -u -m pipeline.g_descend_existing \
+        --g-values "$g" \
+        --source-chi "$chi" --descend-chis "$chi" --sweeps-descend "$SWEEPS" \
+        --lx "$LX" --ly "$LY" --shape "$SHAPE" \
+        --patched \
+        --drive-path "$DRIVE_PATH" \
+        > "$log" 2>&1
+done <<< "$DETECT_SPEC"
+
+echo "Job finished at $(date)"
+echo "DONE"
