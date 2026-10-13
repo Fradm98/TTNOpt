@@ -319,6 +319,35 @@ def main():
     p.add_argument("--ly", type=int, default=9)
     p.add_argument("--shape", default="hexagon")
     p.add_argument("--precision", type=int, default=3)
+    # Omit --bound-state for the vacuum sector (the default). "meson" places
+    # 2 charges (omega, omega^2), "baryon" places 3 (all omega) -- see
+    # Z3_funcs/lattice_plaquettes.py's make_symm_meson/make_symm_baryon.
+    # Charges land on SITES (not plaquettes) and are 3-fold symmetric about
+    # the lattice center by construction; --r is their radius from it.
+    p.add_argument("--bound-state", choices=["meson", "baryon"], default=None,
+                    help="charge sector: omit for vacuum, 'meson' for 2 charges, "
+                         "'baryon' for 3")
+    p.add_argument("--r", type=int, default=1,
+                    help="radius of the bound state's charges from the lattice "
+                         "center (only used with --bound-state, and ignored if "
+                         "--chargesx/--chargesy are given)")
+    # Explicit site coordinates, bypassing the symmetric auto-placement
+    # (get_coord_charges) entirely -- e.g. --chargesx -1 0 1 --chargesy 1 2 0
+    # puts charges at sites (-1,1), (0,2), (1,0). Still requires --bound-state
+    # (meson/baryon) alongside these: create_ids_coeffs_file picks the PHASE
+    # VALUES from bound_state alone (meson -> [omega, omega^2], anything else
+    # -> all omega) and zips them against chargesx/chargesy positionally --
+    # it does NOT derive the phase count from len(chargesx). Passing 3
+    # coordinates with --bound-state meson (2 phases) or 2 coordinates with
+    # --bound-state baryon (3 phases) will silently truncate to the shorter
+    # length via zip, not error. Must match in length.
+    p.add_argument("--chargesx", type=int, nargs="+", default=None,
+                    help="explicit site i-coordinates for each charge, same "
+                         "length as --chargesy and matching --bound-state's "
+                         "phase count (2 for meson, 3 for baryon)")
+    p.add_argument("--chargesy", type=int, nargs="+", default=None,
+                    help="explicit site j-coordinates for each charge, paired "
+                         "with --chargesx")
     p.add_argument("--unpatched", action="store_true", default=True)
     p.add_argument("--patched", dest="unpatched", action="store_false")
     p.add_argument("--warm-start-g", action="store_true")
@@ -345,12 +374,30 @@ def main():
             "the original dense lanczos() has no such parameters."
         )
 
+    if (args.chargesx is None) != (args.chargesy is None):
+        p.error("--chargesx and --chargesy must both be given, or neither.")
+    if args.chargesx is not None:
+        if args.bound_state is None:
+            p.error("--chargesx/--chargesy require --bound-state (picks the phase "
+                     "values they get zipped against -- see --chargesx's help).")
+        if len(args.chargesx) != len(args.chargesy):
+            p.error(f"--chargesx ({len(args.chargesx)} values) and --chargesy "
+                     f"({len(args.chargesy)} values) must be the same length.")
+        n_phases = 2 if args.bound_state == "meson" else 3
+        if len(args.chargesx) != n_phases:
+            p.error(f"--bound-state {args.bound_state} expects {n_phases} charges, "
+                     f"got {len(args.chargesx)} coordinates. create_ids_coeffs_file "
+                     f"zips coordinates against phase values positionally and would "
+                     f"otherwise silently truncate to the shorter of the two.")
+
     g_raw = np.linspace(args.g_min, args.g_max, args.n_g)
     g_values = [-float(g) for g in g_raw]
     drive_path = args.drive_path or drive_path_for_device(args.device)
 
     run_g_sweep(
         g_values=g_values, chis=args.chis, Lx=args.lx, Ly=args.ly, shape=args.shape,
+        bound_state=args.bound_state, R=args.r,
+        chargesx=args.chargesx, chargesy=args.chargesy,
         precision=args.precision, sweeps_ascend=args.sweeps_ascend,
         sweeps_converge=args.sweeps_converge,
         # A single CLI value still means "broadcast to every descend stage"

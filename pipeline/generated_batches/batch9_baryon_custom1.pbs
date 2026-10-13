@@ -1,0 +1,29 @@
+#!/bin/bash
+#PBS -N g_sweep_b9_baryon_custom1
+#PBS -l select=1:ncpus=14:mem=180gb
+#PBS -l walltime=200:00:00
+#PBS -j oe
+#PBS -o pbs_g_sweep_batch9_baryon_custom1.log
+
+cd $PBS_O_WORKDIR
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+export OMP_NUM_THREADS=14
+export MKL_NUM_THREADS=14
+export OPENBLAS_NUM_THREADS=14
+mkdir -p ../5_Z3/logs
+
+echo "batch 9: g in [1.000000, 1.000000] (1 points), threads=14, sector=baryon, node=$(hostname)"
+echo "cpuset actually assigned by PBS:"; numactl --show 2>/dev/null | grep -E "cpubind|nodebind" || true
+
+"$PYTHON" -u -m pipeline.g_sweep \
+    --lx 5 --ly 9 --shape hexagon \
+    --g-min 1.000000 --g-max 1.000000 --n-g 1 \
+    --chis 9 27 50 81 \
+    --sweeps-ascend 3 --lanczos-tol-ascend 1e-6 \
+    --sweeps-converge 40 --sweeps-descend 25 20 10 \
+    --entanglement-convergence-threshold 1e-8 \
+    --patched  --bound-state baryon --chargesx -1 -2 3 --chargesy 2 7 3 \
+    --drive-path /home/fradm/projects/5_Z3 \
+    > ../5_Z3/logs/g_sweep_batch9_baryon_custom1.log 2>&1
+
+echo "batch 9 finished at $(date)"

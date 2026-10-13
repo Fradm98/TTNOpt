@@ -33,12 +33,12 @@ set -euo pipefail
 # per job, not a contiguous-range slice, per the confirmed 8-thread finding
 # (thread_count_sweep_presto.pbs) and the job-busy packing model.
 N_BATCHES=15
-CORES_PER_BATCH=8             # matches THREADS_PER_BATCH -- confirmed optimum
+CORES_PER_BATCH=14             # matches THREADS_PER_BATCH -- confirmed optimum
                               # for the hexagon workload at chi=50; chi=81 not
                               # separately re-calibrated (time-constrained
                               # decision, not re-tested at this scale)
-THREADS_PER_BATCH=8
-WALLTIME="144:00:00"          # 6 days -- Mac took ~2.5 days for g=-1.500
+THREADS_PER_BATCH=14
+WALLTIME="200:00:00"          # 6 days -- Mac took ~2.5 days for g=-1.500
                               # (the easiest point); presto's per-thread
                               # throughput at 8 threads vs the Mac's uncontrolled
                               # thread count is unverified, so this is a
@@ -51,7 +51,7 @@ WALLTIME="144:00:00"          # 6 days -- Mac took ~2.5 days for g=-1.500
 # jobs pack onto one node (384gb/node / 130gb =~ 3 jobs/node by memory, vs
 # 96 cores/node / 8 cores =~ 12 jobs/node by cores). 15 jobs will really span
 # ~5 nodes' worth of memory, not the ~1.25 nodes the core count alone suggests.
-MEM_PER_BATCH="130gb"
+MEM_PER_BATCH="180gb"
 
 G_MIN=0.1
 G_MAX=1.5
@@ -74,8 +74,45 @@ SHAPE=hexagon
 ENGINE_FLAG="--patched"
 WARM_START_FLAG=""           # cold start every point -- matches the confined-phase-first reliability discipline
 
+# Charge sector. Empty = vacuum (the runs so far). "meson" = 2 charges
+# (omega, omega^2), "baryon" = 3 charges (all omega). Charges sit on SITES
+# (not plaquettes), 3-fold symmetric about the lattice center, at radius
+# BOUND_STATE_R from it -- verified symmetric for hexagons down to 2x3.
+# Note this changes the output folder (runs_vacuum -> runs_3-q/x..._y...),
+# so baryon runs land alongside, not on top of, the vacuum ones.
+BOUND_STATE="baryon"         # "" | "meson" | "baryon"
+BOUND_STATE_R=2
+
+# Explicit site coordinates, bypassing the R-based symmetric placement
+# above entirely (see pipeline/g_sweep.py's --chargesx/--chargesy and the
+# hex_5x9_sites plot for picking them). Leave both empty to use
+# BOUND_STATE_R instead. If set, length must match BOUND_STATE's phase
+# count (2 for meson, 3 for baryon) -- g_sweep.py errors loudly if not.
+CHARGESX="-1 -2 3"     # e.g. "-1 -2 3"
+CHARGESY="2 7 3"        # e.g. "2 7 3"
+
+# Suffix for generated filenames/job names, so a second sector's batches
+# don't overwrite the vacuum ones (or each other) in OUT_DIR. Set e.g.
+# "_baryon_R2" or "_baryon_custom1" -- MUST change between runs that use
+# a different charge configuration, or this run's batch*.pbs/log files
+# silently overwrite the previous set's.
+NAME_SUFFIX="_baryon_custom1"
+
 OUT_DIR="pipeline/generated_batches"
 DRIVE_PATH="/home/fradm/projects/5_Z3"
+
+# Assembled once here rather than inline in the template, so the vacuum
+# case emits no flags at all (identical output to before this option existed).
+if [ -n "$BOUND_STATE" ]; then
+    BOUND_STATE_FLAGS="--bound-state ${BOUND_STATE}"
+    if [ -n "$CHARGESX" ]; then
+        BOUND_STATE_FLAGS="${BOUND_STATE_FLAGS} --chargesx ${CHARGESX} --chargesy ${CHARGESY}"
+    else
+        BOUND_STATE_FLAGS="${BOUND_STATE_FLAGS} --r ${BOUND_STATE_R}"
+    fi
+else
+    BOUND_STATE_FLAGS=""
+fi
 
 # ---------------------------------------------------------------------------
 mkdir -p "$OUT_DIR"
@@ -113,15 +150,15 @@ for i in "${!SLICE_MINS[@]}"; do
     gmin=${SLICE_MINS[$i]}
     gmax=${SLICE_MAXS[$i]}
     ng=${SLICE_NS[$i]}
-    script="$OUT_DIR/batch${i}.pbs"
+    script="$OUT_DIR/batch${i}${NAME_SUFFIX}.pbs"
 
     cat > "$script" <<EOF
 #!/bin/bash
-#PBS -N g_sweep_b${i}
+#PBS -N g_sweep_b${i}${NAME_SUFFIX}
 #PBS -l select=1:ncpus=${CORES_PER_BATCH}:mem=${MEM_PER_BATCH}
 #PBS -l walltime=${WALLTIME}
 #PBS -j oe
-#PBS -o pbs_g_sweep_batch${i}.log
+#PBS -o pbs_g_sweep_batch${i}${NAME_SUFFIX}.log
 
 cd \$PBS_O_WORKDIR
 PYTHON="\$HOME/.conda/envs/ttn/bin/python"
@@ -130,7 +167,7 @@ export MKL_NUM_THREADS=${THREADS_PER_BATCH}
 export OPENBLAS_NUM_THREADS=${THREADS_PER_BATCH}
 mkdir -p ../5_Z3/logs
 
-echo "batch ${i}: g in [${gmin}, ${gmax}] (${ng} points), threads=${THREADS_PER_BATCH}, node=\$(hostname)"
+echo "batch ${i}: g in [${gmin}, ${gmax}] (${ng} points), threads=${THREADS_PER_BATCH}, sector=${BOUND_STATE:-vacuum}, node=\$(hostname)"
 echo "cpuset actually assigned by PBS:"; numactl --show 2>/dev/null | grep -E "cpubind|nodebind" || true
 
 "\$PYTHON" -u -m pipeline.g_sweep \\
@@ -140,9 +177,9 @@ echo "cpuset actually assigned by PBS:"; numactl --show 2>/dev/null | grep -E "c
     --sweeps-ascend ${SWEEPS_ASCEND} --lanczos-tol-ascend ${LANCZOS_TOL_ASCEND} \\
     --sweeps-converge ${SWEEPS_CONVERGE} --sweeps-descend ${SWEEPS_DESCEND} \\
     --entanglement-convergence-threshold ${ENTANGLEMENT_CONVERGENCE_THRESHOLD} \\
-    ${ENGINE_FLAG} ${WARM_START_FLAG} \\
+    ${ENGINE_FLAG} ${WARM_START_FLAG} ${BOUND_STATE_FLAGS} \\
     --drive-path ${DRIVE_PATH} \\
-    > ../5_Z3/logs/g_sweep_batch${i}.log 2>&1
+    > ../5_Z3/logs/g_sweep_batch${i}${NAME_SUFFIX}.log 2>&1
 
 echo "batch ${i} finished at \$(date)"
 EOF
