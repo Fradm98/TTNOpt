@@ -1,0 +1,67 @@
+#!/bin/bash
+#PBS -N descend_from_chimax
+#PBS -l select=1:ncpus=14:mem=130gb
+#PBS -l walltime=144:00:00
+#PBS -j oe
+#PBS -o pbs_descend_from_chimax.log
+
+# Refresh chi=50/27/9 for g-points whose chi=81 never converged but is
+# being used anyway (provisional basic.csv via make_provisional_basic_csv.pbs):
+# their lower-chi basic.csv/tensors are still the cheap ASCEND-phase ones.
+# This truncates the existing chi=81 tensor at the SAME g down through
+# DESCEND_CHIS (g_descend_existing.py), overwriting run_chi-{50,27,9}/
+# basic.csv, convergence.csv and their tensors.hdf5 entries. Converges as
+# far as the (unconverged) chi=81 state allows -- each stage stops at its
+# sweep budget if the thresholds aren't reached; check convergence.csv.
+#
+# One g per job (pass G via -v). To find and submit every affected point:
+#
+#   G_LIST=$($HOME/.conda/envs/ttn/bin/python -m pipeline.g_descend_existing --list-stale \
+#       --source-chi 81 --descend-chis 50 27 9 --lx 5 --ly 9 --shape hexagon \
+#       --drive-path /home/fradm/projects/5_Z3 | tail -1)
+#   for g in $G_LIST; do qsub -o pbs_descend_g$g.log -v G=$g pipeline/descend_from_chimax.pbs; done
+#
+# --list-stale flags a g when any descend chi's basic.csv is missing or
+# OLDER than chi=81's, i.e. was never descended from the current chi=81 state.
+#
+# mem: the job works at chi<=50, but the first sweeps still touch the
+# loaded chi=81 tensors -- 130gb is the chi=81 production value, kept as a
+# safe pad (not separately measured for this descent).
+
+cd $PBS_O_WORKDIR
+
+if [ -z "$G" ]; then
+    echo "ERROR: pass the g-value with qsub -v G=<g> (see header)" >&2
+    exit 1
+fi
+
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+DRIVE_PATH="/home/fradm/projects/5_Z3"
+LX=5
+LY=9
+SHAPE=hexagon
+SOURCE_CHI=81
+DESCEND_CHIS="50 27 9"
+SWEEPS_DESCEND="25 20 10"    # same tapered budget as the production batches
+ENERGY_CONVERGENCE_THRESHOLD=1e-10
+ENTANGLEMENT_CONVERGENCE_THRESHOLD=1e-8   # matches g_sweep_presto_batch_generator.sh
+
+export OMP_NUM_THREADS=14
+export MKL_NUM_THREADS=14
+export OPENBLAS_NUM_THREADS=14
+
+mkdir -p ../5_Z3/logs
+log="../5_Z3/logs/descend_from_chi${SOURCE_CHI}_g${G}.log"
+echo "g=$G: chi=$SOURCE_CHI -> $DESCEND_CHIS on $(hostname) at $(date), log: $log"
+
+"$PYTHON" -u -m pipeline.g_descend_existing \
+    --g-values "$G" \
+    --source-chi "$SOURCE_CHI" --descend-chis $DESCEND_CHIS --sweeps-descend $SWEEPS_DESCEND \
+    --energy-convergence-threshold "$ENERGY_CONVERGENCE_THRESHOLD" \
+    --entanglement-convergence-threshold "$ENTANGLEMENT_CONVERGENCE_THRESHOLD" \
+    --lx "$LX" --ly "$LY" --shape "$SHAPE" \
+    --patched \
+    --drive-path "$DRIVE_PATH" \
+    > "$log" 2>&1
+
+echo "g=$G finished at $(date)"

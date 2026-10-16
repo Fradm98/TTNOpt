@@ -21,11 +21,27 @@ by 2-6 orders of magnitude), confirming sweep.py's own design philosophy
 (truncate down from the best available state) -- as long as the descend
 budget is actually large enough to re-equilibrate after the cut.
 
+--sweeps-descend may also be a list, one entry per --descend-chis stage
+(e.g. 25 20 10 for 81->50->27->9, matching g_sweep.py's tapered recipe).
+
+Also the way to REFRESH lower chis whose basic.csv still comes from the
+ASCEND phase (cheap, unconverged) when chi_max never fully converged but
+is being used anyway (provisional basic.csv via
+make_provisional_basic_csv.pbs): descending from that chi_max tensor
+overwrites run_chi-{chi}/basic.csv, convergence.csv and the tensors.hdf5
+entry for every descend chi. --list-stale finds those g-points: a lower
+chi whose basic.csv is OLDER than source_chi's (or missing) was never
+descended from the current source_chi state. (ALL_STAGES_DONE can't be
+used for this -- the provisional same-chi reload touches it too.)
+
 Usage:
   python pipeline/g_descend_existing.py --g-values -0.60 -0.61 ... -0.80 \
       --source-chi 50 --descend-chis 27 18 9 --sweeps-descend 10 --device mac
+  python pipeline/g_descend_existing.py --list-stale \
+      --source-chi 81 --descend-chis 50 27 9 --lx 5 --ly 9 --shape hexagon --device presto
 """
 import argparse
+import glob
 import os
 import subprocess
 
@@ -37,11 +53,53 @@ from pipeline.g_sweep import (
 from Z3_funcs.create_graph_file import create_ids_coeffs_file, nplaqs
 
 
+def list_stale(
+    source_chi, descend_chis, Lx=5, Ly=5, shape="parallelogram",
+    bound_state=None, chargesx=None, chargesy=None, R=None,
+    precision=3, device=DEFAULT_DEVICE, drive_path=None, g_values=None,
+):
+    """g-values (all g_* run folders if g_values is None) that have a
+    source_chi basic.csv but at least one descend chi whose basic.csv is
+    missing or older than it."""
+    drive_path = drive_path or drive_path_for_device(device)
+    folder, _, _ = get_folder(drive_path, Lx, Ly, shape, bound_state, chargesx, chargesy, R)
+    if g_values is None:
+        g_values = sorted(float(os.path.basename(p)[2:]) for p in glob.glob(f"{folder}/g_*"))
+
+    stale = []
+    for g in g_values:
+        run_folder = f"{folder}/g_{g:.{precision}f}"
+        source_csv = f"{run_folder}/run_chi-{source_chi}/basic.csv"
+        if not os.path.exists(source_csv):
+            continue
+        source_mtime = os.path.getmtime(source_csv)
+        old = [
+            chi for chi in descend_chis
+            if not os.path.exists(f"{run_folder}/run_chi-{chi}/basic.csv")
+            or os.path.getmtime(f"{run_folder}/run_chi-{chi}/basic.csv") < source_mtime
+        ]
+        if old:
+            stale.append(g)
+            print(f"g={g:.{precision}f}: chi {old} older than chi={source_chi}", flush=True)
+    return stale
+
+
 def descend_existing(
     g_values, source_chi, descend_chis, sweeps_descend=10,
     Lx=5, Ly=5, shape="parallelogram", bound_state=None, chargesx=None, chargesy=None, R=None,
     precision=3, device=DEFAULT_DEVICE, drive_path=None, unpatched=True,
+    energy_convergence_threshold=1e-5, entanglement_convergence_threshold=1e-10,
 ):
+    if isinstance(sweeps_descend, (list, tuple)):
+        if len(sweeps_descend) != len(descend_chis):
+            raise ValueError(
+                f"sweeps_descend list must have one entry per descend chi "
+                f"({len(descend_chis)}), got {len(sweeps_descend)}: {sweeps_descend}"
+            )
+        sweeps_descend_list = list(sweeps_descend)
+    else:
+        sweeps_descend_list = [sweeps_descend] * len(descend_chis)
+
     drive_path = drive_path or drive_path_for_device(device)
     N = nplaqs(Lx, Ly, shape)
     folder, chargesx, chargesy = get_folder(drive_path, Lx, Ly, shape, bound_state, chargesx, chargesy, R)
@@ -59,8 +117,8 @@ def descend_existing(
         numerics_dict = {
             "opt_structure": {"type": 0},
             "initial_bond_dimension": source_chi,
-            "energy_convergence_threshold": 1e-5,
-            "entanglement_convergence_threshold": 1e-10,
+            "energy_convergence_threshold": energy_convergence_threshold,
+            "entanglement_convergence_threshold": entanglement_convergence_threshold,
             "energy_degeneracy_threshold": 1e-13,
             "entanglement_degeneracy_threshold": 1e-8,
             "verbose_sweeps": True,
@@ -70,7 +128,7 @@ def descend_existing(
             "init_g": g,
             "init_chi": source_chi,
             "max_bond_dimensions": list(descend_chis),
-            "max_num_sweeps": [sweeps_descend] * len(descend_chis),
+            "max_num_sweeps": sweeps_descend_list,
             "lanczos_tol": [None] * len(descend_chis),
             "lanczos_maxiter": [None] * len(descend_chis),
         }
@@ -102,7 +160,7 @@ def descend_existing(
             # g-points -- log it and keep going instead of dying here.
             failed.append(g)
             print(f"[g={g:.{precision}f}] FAILED ({e}) -- continuing with the remaining g-values", flush=True)
-
+    
     if failed:
         print(f"\n{len(failed)} g-value(s) failed: {[f'{g:.{precision}f}' for g in failed]}")
     print("DONE")
@@ -111,10 +169,16 @@ def descend_existing(
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--g-values", type=float, nargs="+", required=True)
+    p.add_argument("--g-values", type=float, nargs="+", default=None,
+                   help="required unless --list-stale (where it restricts the scan; default: every g_* folder)")
     p.add_argument("--source-chi", type=int, required=True)
     p.add_argument("--descend-chis", type=int, nargs="+", required=True)
-    p.add_argument("--sweeps-descend", type=int, default=10)
+    p.add_argument("--sweeps-descend", type=int, nargs="+", default=[10],
+                   help="one value for every stage, or one per --descend-chis entry")
+    p.add_argument("--energy-convergence-threshold", type=float, default=1e-5)
+    p.add_argument("--entanglement-convergence-threshold", type=float, default=1e-10)
+    p.add_argument("--list-stale", action="store_true",
+                   help="only print g-values whose descend-chi basic.csv is missing/older than source-chi's")
     p.add_argument("--lx", type=int, default=5)
     p.add_argument("--ly", type=int, default=5)
     p.add_argument("--shape", default="parallelogram")
@@ -125,10 +189,24 @@ def main():
     p.add_argument("--drive-path", default=None)
     args = p.parse_args()
 
+    if args.list_stale:
+        stale = list_stale(
+            args.source_chi, args.descend_chis, Lx=args.lx, Ly=args.ly, shape=args.shape,
+            precision=args.precision, device=args.device, drive_path=args.drive_path,
+            g_values=args.g_values,
+        )
+        print(" ".join(f"{g:.{args.precision}f}" for g in stale))
+        return
+    if not args.g_values:
+        p.error("--g-values is required unless --list-stale")
+
+    sweeps = args.sweeps_descend[0] if len(args.sweeps_descend) == 1 else args.sweeps_descend
     descend_existing(
-        args.g_values, args.source_chi, args.descend_chis, sweeps_descend=args.sweeps_descend,
+        args.g_values, args.source_chi, args.descend_chis, sweeps_descend=sweeps,
         Lx=args.lx, Ly=args.ly, shape=args.shape, precision=args.precision,
         device=args.device, drive_path=args.drive_path, unpatched=args.unpatched,
+        energy_convergence_threshold=args.energy_convergence_threshold,
+        entanglement_convergence_threshold=args.entanglement_convergence_threshold,
     )
 
 
