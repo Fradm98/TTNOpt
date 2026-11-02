@@ -6,12 +6,14 @@ off-axis baryons: one color per sector, one shade per chi (darkest = largest).
 Right panel: excess over the vacuum at the same g and chi.
 
 Also prints what exists for each point and what is still missing:
-  chi_max  ok = converged (ALL_STAGES_DONE), prov = basic.csv without it,
-           -- = no basic.csv
-  chi<max  ok = newer than chi_max's basic.csv and input_descend.yml, i.e.
-           descended, old = older, so a cheap ascend-stage value (or chi_max
-           changed after the descent), -- = no basic.csv
-On the plot, filled = ok; hollow = provisional or old. Pass --list-only to
+  ok    = last convergence.csv row has converged_this_sweep=True
+  prov  = basic.csv, but not converged (ALL_STAGES_DONE can't tell: the
+          provisional same-chi reload touches it too)
+  old   = chi<chi_max only: basic.csv older than chi_max's basic.csv and
+          input_descend.yml, so a cheap ascend-stage value (or chi_max
+          changed after the descent)
+  --    = no basic.csv
+On the plot, filled = ok; hollow = prov or old. Pass --list-only to
 print the table without plotting.
 
 Usage (on the cluster, from the TTNOpt root):
@@ -36,6 +38,14 @@ SECTORS = [
 ]
 
 
+def _converged(run_folder):
+    f = f"{run_folder}/convergence.csv"
+    if not os.path.exists(f):
+        return False
+    rows = pd.read_csv(f)
+    return len(rows) > 0 and str(rows["converged_this_sweep"].iloc[-1]).strip() == "True"
+
+
 def collect(config_folder, chis):
     """One row per (g, chi) with a basic.csv, plus the status of each chi."""
     chi_max = max(chis)
@@ -45,7 +55,6 @@ def collect(config_folder, chis):
         if not m:
             continue  # e.g. g_-1.500_stuck
         g = float(m.group(1))
-        done = os.path.exists(f"{g_folder}/ALL_STAGES_DONE")
         top = f"{g_folder}/run_chi-{chi_max}/basic.csv"
         # A descent writes input_descend.yml first, then the lower chis, so
         # this also works when chi_max has no basic.csv of its own.
@@ -57,10 +66,10 @@ def collect(config_folder, chis):
             if not os.path.exists(f):
                 rows.append({"g": g, "chi": chi, "S": float("nan"), "status": "--"})
                 continue
-            if chi == chi_max:
-                status = "ok" if done else "prov"
+            if chi != chi_max and (top_time is None or os.path.getmtime(f) <= top_time):
+                status = "old"
             else:
-                status = "ok" if top_time is not None and os.path.getmtime(f) > top_time else "old"
+                status = "ok" if _converged(f"{g_folder}/run_chi-{chi}") else "prov"
             S = float(pd.read_csv(f)["entanglement"].iloc[-1])
             rows.append({"g": g, "chi": chi, "S": S, "status": status})
     return pd.DataFrame(rows, columns=["g", "chi", "S", "status"])
@@ -97,7 +106,7 @@ def plot(data, chis, title, out):
             if len(d):
                 _draw(ax_d, d["g"], d["S"].values - v[d["g"]].values, d["status"], color, f"{name}, chi={chi}")
 
-    ax_s.plot([], [], "o", color="gray", markerfacecolor="none", label="provisional or not descended")
+    ax_s.plot([], [], "o", color="gray", markerfacecolor="none", label="not converged or not descended")
     ax_s.set_ylabel("final entanglement entropy S (reference bond)")
     ax_s.set_title(title)
     ax_d.axhline(0, color="k", lw=0.8)
