@@ -1,0 +1,31 @@
+#!/bin/bash
+#PBS -N plot_links_sectors
+#PBS -q standard
+#PBS -l select=1:ncpus=4:mem=70gb
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o pbs_plot_links_sectors.log
+
+# Link-field plots for vacuum and both baryons (pipeline/plot_links_sectors.py).
+# PDFs go to 5_Z3/figures, progress to 5_Z3/logs/plot_links_sectors.log.
+#
+# Pick a node with real free memory: pbsnodes shows requested memory, not use.
+# Passing -l select on qsub overrides the line above:
+#
+#   qsub -l select=1:ncpus=4:mem=70gb:host=node07 pipeline/plot_links_sectors.pbs
+#
+# mem: 70gb is an estimate, not measured at chi=81 -- check it in qwatch.
+# Results are cached, so a rerun after a walltime cut skips finished points.
+
+cd $PBS_O_WORKDIR
+
+PYTHON="$HOME/.conda/envs/ttn/bin/python"
+
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
+export MPLBACKEND=Agg
+
+mkdir -p ../5_Z3/logs
+
+"$PYTHON" -u -m pipeline.plot_links_sectors > ../5_Z3/logs/plot_links_sectors.log 2>&1
