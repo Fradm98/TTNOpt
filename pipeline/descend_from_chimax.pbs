@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -N descend_from_chimax
 #PBS -q standard
-#PBS -l select=1:ncpus=14:mem=130gb
+#PBS -l select=1:ncpus=8:mem=100gb
 #PBS -l walltime=24:00:00
 #PBS -j oe
 #PBS -o pbs_descend_from_chimax.log
@@ -37,9 +37,8 @@
 # tensors.hdf5: if it doesn't, the run falls back to a random start.
 #
 # mem: the job works at chi<=50, but the first sweeps still touch the
-# loaded chi=81 tensors -- 130gb is the chi=81 production value, kept as a
-# safe pad (not separately measured for this descent) -- lower it once qwatch
-# shows the real peak.
+# loaded chi=81 tensors. 100gb is below the chi=81 production peak (~135gb)
+# and not measured for this descent -- check the real peak in qwatch.
 #
 # walltime: a Mac-log chi=50 sweep took 0.5h on average, 1.5h at most, and
 # descents usually converged in under 10 sweeps. A descent has no resume: if
@@ -63,9 +62,9 @@ SWEEPS_DESCEND="25 20 10"    # same tapered budget as the production batches
 ENERGY_CONVERGENCE_THRESHOLD=1e-10
 ENTANGLEMENT_CONVERGENCE_THRESHOLD=1e-8   # matches g_sweep_presto_batch_generator.sh
 
-export OMP_NUM_THREADS=14
-export MKL_NUM_THREADS=14
-export OPENBLAS_NUM_THREADS=14
+export OMP_NUM_THREADS=8
+export MKL_NUM_THREADS=8
+export OPENBLAS_NUM_THREADS=8
 
 CHARGE_ARGS=""
 TAG=vacuum
