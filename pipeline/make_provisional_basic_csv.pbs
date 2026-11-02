@@ -1,7 +1,8 @@
 #!/bin/bash
 #PBS -N provisional_basic_csv
-#PBS -l select=1:ncpus=8:mem=200gb
-#PBS -l walltime=100:00:00
+#PBS -q standard
+#PBS -l select=1:ncpus=8:mem=150gb
+#PBS -l walltime=24:00:00
 #PBS -j oe
 #PBS -o pbs_provisional_basic_csv.log
 
@@ -29,8 +30,11 @@
 # should be a negligible perturbation if the state was anywhere close to
 # settled.
 #
-# mem=200gb is a rough pad above the observed ~130gb at chi=81 -- bump it
-# if CHIS includes 128, which hasn't been separately measured.
+# mem=150gb is a pad above the observed ~135gb at chi=81 -- bump it if CHIS
+# includes 128, which hasn't been separately measured.
+#
+# walltime: if cut at 24h, resubmit -- points that got their basic.csv are
+# detected and skipped.
 #
 # Submit with: qsub pipeline/make_provisional_basic_csv.pbs
 

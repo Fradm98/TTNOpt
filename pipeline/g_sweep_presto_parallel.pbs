@@ -1,7 +1,8 @@
 #!/bin/bash
 #PBS -N g_sweep_parallel
+#PBS -q standard
 #PBS -l select=1:ncpus=96:mem=350gb
-#PBS -l walltime=48:00:00
+#PBS -l walltime=24:00:00
 #PBS -j oe
 #PBS -o pbs_g_sweep_parallel.log
 

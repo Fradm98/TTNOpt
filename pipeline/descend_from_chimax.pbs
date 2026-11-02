@@ -1,7 +1,8 @@
 #!/bin/bash
 #PBS -N descend_from_chimax
+#PBS -q standard
 #PBS -l select=1:ncpus=14:mem=130gb
-#PBS -l walltime=144:00:00
+#PBS -l walltime=24:00:00
 #PBS -j oe
 #PBS -o pbs_descend_from_chimax.log
 
@@ -37,7 +38,12 @@
 #
 # mem: the job works at chi<=50, but the first sweeps still touch the
 # loaded chi=81 tensors -- 130gb is the chi=81 production value, kept as a
-# safe pad (not separately measured for this descent).
+# safe pad (not separately measured for this descent) -- lower it once qwatch
+# shows the real peak.
+#
+# walltime: a Mac-log chi=50 sweep took 0.5h on average, 1.5h at most, and
+# descents usually converged in under 10 sweeps. A descent has no resume: if
+# one is cut, it restarts from chi=81, so use -q long -l walltime=<h> instead.
 
 cd $PBS_O_WORKDIR
 

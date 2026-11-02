@@ -38,11 +38,11 @@ CORES_PER_BATCH=14             # matches THREADS_PER_BATCH -- confirmed optimum
                               # separately re-calibrated (time-constrained
                               # decision, not re-tested at this scale)
 THREADS_PER_BATCH=14
-WALLTIME="200:00:00"          # 6 days -- Mac took ~2.5 days for g=-1.500
-                              # (the easiest point); presto's per-thread
-                              # throughput at 8 threads vs the Mac's uncontrolled
-                              # thread count is unverified, so this is a
-                              # deliberate ~2.4x safety margin, not a measured bound
+QUEUE="long"                  # presto policy: walltime over 24h needs -q long (max 10 days, 1 running job
+                              # per user). Not "standard": a chi=81 sweep takes hours (6-9h in the Mac log),
+                              # and a restart resets the convergence history and redoes chi_max, so 24h
+                              # jobs may never converge. Use "standard" (with WALLTIME<=24h) for smaller chis.
+WALLTIME="200:00:00"          # about 8 days; the baryon chi=81 points were still running past 4.8 days
 # ~90.6 GB RSS observed on the Mac for the REAL chi=81 hexagon 5x9 job
 # (PID 48402, g=-1.400, sweep 6/40) -- this is a real data point, not a guess.
 # 130gb leaves headroom above that peak; an OOM kill partway through a 6-day
@@ -51,7 +51,7 @@ WALLTIME="200:00:00"          # 6 days -- Mac took ~2.5 days for g=-1.500
 # jobs pack onto one node (384gb/node / 130gb =~ 3 jobs/node by memory, vs
 # 96 cores/node / 8 cores =~ 12 jobs/node by cores). 15 jobs will really span
 # ~5 nodes' worth of memory, not the ~1.25 nodes the core count alone suggests.
-MEM_PER_BATCH="180gb"
+MEM_PER_BATCH="150gb"          # chi=81: observed peak ~135gb plus margin (presto policy: realistic peak)
 
 G_MIN=0.1
 G_MAX=1.5
@@ -155,6 +155,7 @@ for i in "${!SLICE_MINS[@]}"; do
     cat > "$script" <<EOF
 #!/bin/bash
 #PBS -N g_sweep_b${i}${NAME_SUFFIX}
+#PBS -q ${QUEUE}
 #PBS -l select=1:ncpus=${CORES_PER_BATCH}:mem=${MEM_PER_BATCH}
 #PBS -l walltime=${WALLTIME}
 #PBS -j oe
