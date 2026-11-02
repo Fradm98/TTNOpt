@@ -24,6 +24,14 @@
 # --list-stale flags a g when any descend chi's basic.csv is missing or
 # OLDER than chi=81's, i.e. was never descended from the current chi=81 state.
 #
+# Charge sector: vacuum by default. Otherwise pass BOUND_STATE plus R, or
+# explicit CHARGESX/CHARGESY, matching the original g_sweep run (and add the
+# same flags, e.g. --bound-state baryon --r 2, to the --list-stale call above):
+#
+#   qsub -o pbs_descend_baryon_R2_g0.100.log -v G=0.100,BOUND_STATE=baryon,R=2 pipeline/descend_from_chimax.pbs
+#   qsub -o pbs_descend_baryon_custom1_g0.100.log \
+#       -v "G=0.100,BOUND_STATE=baryon,CHARGESX=-1 -2 3,CHARGESY=2 7 3" pipeline/descend_from_chimax.pbs
+#
 # mem: the job works at chi<=50, but the first sweeps still touch the
 # loaded chi=81 tensors -- 130gb is the chi=81 production value, kept as a
 # safe pad (not separately measured for this descent).
@@ -50,8 +58,19 @@ export OMP_NUM_THREADS=14
 export MKL_NUM_THREADS=14
 export OPENBLAS_NUM_THREADS=14
 
+CHARGE_ARGS=""
+TAG=vacuum
+if [ -n "$BOUND_STATE" ]; then
+    CHARGE_ARGS="--bound-state $BOUND_STATE --r ${R:-1}"
+    TAG="${BOUND_STATE}_R${R:-1}"
+    if [ -n "$CHARGESX" ]; then
+        CHARGE_ARGS="$CHARGE_ARGS --chargesx $CHARGESX --chargesy $CHARGESY"
+        TAG="${BOUND_STATE}_x${CHARGESX// /_}_y${CHARGESY// /_}"
+    fi
+fi
+
 mkdir -p ../5_Z3/logs
-log="../5_Z3/logs/descend_from_chi${SOURCE_CHI}_g${G}.log"
+log="../5_Z3/logs/descend_from_chi${SOURCE_CHI}_${TAG}_g${G}.log"
 echo "g=$G: chi=$SOURCE_CHI -> $DESCEND_CHIS on $(hostname) at $(date), log: $log"
 
 "$PYTHON" -u -m pipeline.g_descend_existing \
@@ -60,7 +79,7 @@ echo "g=$G: chi=$SOURCE_CHI -> $DESCEND_CHIS on $(hostname) at $(date), log: $lo
     --energy-convergence-threshold "$ENERGY_CONVERGENCE_THRESHOLD" \
     --entanglement-convergence-threshold "$ENTANGLEMENT_CONVERGENCE_THRESHOLD" \
     --lx "$LX" --ly "$LY" --shape "$SHAPE" \
-    --patched \
+    --patched $CHARGE_ARGS \
     --drive-path "$DRIVE_PATH" \
     > "$log" 2>&1
 

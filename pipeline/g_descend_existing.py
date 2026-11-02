@@ -187,13 +187,42 @@ def main():
     p.add_argument("--patched", dest="unpatched", action="store_false")
     p.add_argument("--device", choices=list(DEVICE_DRIVE_PATHS), default=DEFAULT_DEVICE)
     p.add_argument("--drive-path", default=None)
+    # Same meaning as in g_sweep.py -- must match the run being descended,
+    # since they select its folder and its tensors.hdf5 entry.
+    p.add_argument("--bound-state", choices=["meson", "baryon"], default=None,
+                   help="charge sector: omit for vacuum, 'meson' for 2 charges, 'baryon' for 3")
+    p.add_argument("--r", type=int, default=1,
+                   help="radius of the bound state's charges from the lattice center "
+                        "(only used with --bound-state, and ignored if --chargesx/--chargesy are given)")
+    p.add_argument("--chargesx", type=int, nargs="+", default=None,
+                   help="explicit site i-coordinates for each charge, same length as --chargesy")
+    p.add_argument("--chargesy", type=int, nargs="+", default=None,
+                   help="explicit site j-coordinates for each charge, paired with --chargesx")
     args = p.parse_args()
+
+    if (args.chargesx is None) != (args.chargesy is None):
+        p.error("--chargesx and --chargesy must both be given, or neither.")
+    if args.chargesx is not None:
+        if args.bound_state is None:
+            p.error("--chargesx/--chargesy require --bound-state.")
+        if len(args.chargesx) != len(args.chargesy):
+            p.error(f"--chargesx ({len(args.chargesx)} values) and --chargesy "
+                    f"({len(args.chargesy)} values) must be the same length.")
+        n_phases = {"meson": 2, "baryon": 3}[args.bound_state]
+        if len(args.chargesx) != n_phases:
+            p.error(f"--bound-state {args.bound_state} expects {n_phases} charges, "
+                    f"got {len(args.chargesx)} coordinates.")
+
+    charge_kwargs = dict(
+        bound_state=args.bound_state, chargesx=args.chargesx, chargesy=args.chargesy,
+        R=args.r if args.bound_state else None,
+    )
 
     if args.list_stale:
         stale = list_stale(
             args.source_chi, args.descend_chis, Lx=args.lx, Ly=args.ly, shape=args.shape,
             precision=args.precision, device=args.device, drive_path=args.drive_path,
-            g_values=args.g_values,
+            g_values=args.g_values, **charge_kwargs,
         )
         print(" ".join(f"{g:.{args.precision}f}" for g in stale))
         return
@@ -207,6 +236,7 @@ def main():
         device=args.device, drive_path=args.drive_path, unpatched=args.unpatched,
         energy_convergence_threshold=args.energy_convergence_threshold,
         entanglement_convergence_threshold=args.entanglement_convergence_threshold,
+        **charge_kwargs,
     )
 
 
