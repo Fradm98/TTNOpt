@@ -28,9 +28,12 @@
 # explicit CHARGESX/CHARGESY, matching the original g_sweep run (and add the
 # same flags, e.g. --bound-state baryon --r 2, to the --list-stale call above):
 #
-#   qsub -o pbs_descend_baryon_R2_g0.100.log -v G=0.100,BOUND_STATE=baryon,R=2 pipeline/descend_from_chimax.pbs
-#   qsub -o pbs_descend_baryon_custom1_g0.100.log \
-#       -v "G=0.100,BOUND_STATE=baryon,CHARGESX=-1 -2 3,CHARGESY=2 7 3" pipeline/descend_from_chimax.pbs
+#   qsub -o pbs_descend_baryon_R2_g-1.500.log -v G=-1.500,BOUND_STATE=baryon,R=2 pipeline/descend_from_chimax.pbs
+#   qsub -o pbs_descend_baryon_custom1_g-1.500.log \
+#       -v "G=-1.500,BOUND_STATE=baryon,CHARGESX=-1 -2 3,CHARGESY=2 7 3" pipeline/descend_from_chimax.pbs
+#
+# G is the actual, negative coupling. The chi=81 tensor must already exist in
+# tensors.hdf5: if it doesn't, the run falls back to a random start.
 #
 # mem: the job works at chi<=50, but the first sweeps still touch the
 # loaded chi=81 tensors -- 130gb is the chi=81 production value, kept as a
