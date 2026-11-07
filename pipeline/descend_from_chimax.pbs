@@ -72,9 +72,10 @@ SWEEPS_DESCEND="${SWEEPS_DESCEND:-25 20 10}"    # same tapered budget as the pro
 ENERGY_CONVERGENCE_THRESHOLD=1e-10
 ENTANGLEMENT_CONVERGENCE_THRESHOLD=1e-8   # matches g_sweep_presto_batch_generator.sh
 
-export OMP_NUM_THREADS=8
-export MKL_NUM_THREADS=8
-export OPENBLAS_NUM_THREADS=8
+# PBS Pro sets NCPUS to the ncpus requested, so qsub -l select=...:ncpus=14 is used
+export OMP_NUM_THREADS=${NCPUS:-8}
+export MKL_NUM_THREADS=${NCPUS:-8}
+export OPENBLAS_NUM_THREADS=${NCPUS:-8}
 
 CHARGE_ARGS=""
 TAG=vacuum
