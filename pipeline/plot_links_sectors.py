@@ -9,8 +9,13 @@ others.
 Results are cached per (config, g, chi) in tensors.hdf5: pass
 force_recompute=True to replot a g-point whose checkpoint has since changed.
 
+Each point's link values are saved as they are computed, so a run cut by
+the walltime resumes where it stopped.
+
 Usage: qsub pipeline/plot_links_sectors.pbs (see its header)
 """
+import argparse
+
 import matplotlib.pyplot as plt
 
 from pipeline.g_sweep import drive_path_for_device
@@ -31,11 +36,15 @@ CONFIGS = [
 
 
 def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--chis", type=int, nargs="+", default=list(CHIS),
+                   help="chis to try, largest first (default: %(default)s)")
+    chis = sorted(p.parse_args().chis, reverse=True)
     ten_file = f"{drive_path_for_device(DEVICE)}/tensors.hdf5"
     for g in G_VALUES:
         for name, bound_state, R, xs, ys in CONFIGS:
             try:
-                chi = next((c for c in CHIS if tensor_exists(
+                chi = next((c for c in chis if tensor_exists(
                     ten_file, SHAPE, LX, LY, bound_state, R, g, PRECISION, c, chargesx=xs, chargesy=ys,
                 )), None)
                 if chi is None:

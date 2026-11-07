@@ -413,7 +413,7 @@ def _ef_links_grp_path(shape, Lx, Ly, bound_state, R, g, precision, chi, charges
     return f"{base}/{g_key}/run_chi-{chi_str.rjust(4, '0')}"
 
 
-def save_link_electric_fields(ten_file, shape, Lx, Ly, bound_state, R, g, precision, chi, links, chargesx=None, chargesy=None):
+def save_link_electric_fields(ten_file, shape, Lx, Ly, bound_state, R, g, precision, chi, links, chargesx=None, chargesy=None, name="ef_links"):
     """
     Cache computed link electric-field values -- the whole-lattice result
     of Z3_funcs.observables.link_electric_fields(engine, plaquette_label=
@@ -425,6 +425,9 @@ def save_link_electric_fields(ten_file, shape, Lx, Ly, bound_state, R, g, precis
 
     links : dict (i, j, d) -> {"p_left", "p_right", "value", "kind"}
         as returned by link_electric_fields(engine, None, Lx, Ly, shape).
+    name : "ef_links" for the complete result; "ef_links_partial" for the
+        links computed so far by an unfinished run, so a walltime cut can
+        resume. Saving the complete result removes the partial one.
     """
     grp_path = _ef_links_grp_path(shape, Lx, Ly, bound_state, R, g, precision, chi, chargesx, chargesy)
 
@@ -448,9 +451,11 @@ def save_link_electric_fields(ten_file, shape, Lx, Ly, bound_state, R, g, precis
                 f"save_tensor must be called before caching link electric fields."
             )
         grp = f[grp_path]
-        if "ef_links" in grp:
-            del grp["ef_links"]
-        sub = grp.create_group("ef_links")
+        if name in grp:
+            del grp[name]
+        if name == "ef_links" and "ef_links_partial" in grp:
+            del grp["ef_links_partial"]
+        sub = grp.create_group(name)
         sub.create_dataset("ijd", data=ijd)
         sub.create_dataset("p_left", data=p_left)
         sub.create_dataset("p_right", data=p_right)
@@ -458,7 +463,7 @@ def save_link_electric_fields(ten_file, shape, Lx, Ly, bound_state, R, g, precis
         sub.create_dataset("kind", data=kinds, dtype=h5py.string_dtype())
 
 
-def link_electric_fields_exist(ten_file, shape, Lx, Ly, bound_state, R, g, precision, chi, chargesx=None, chargesy=None):
+def link_electric_fields_exist(ten_file, shape, Lx, Ly, bound_state, R, g, precision, chi, chargesx=None, chargesy=None, name="ef_links"):
     """Check whether cached link electric-field values exist for this
     checkpoint, without raising if the file/group is missing. Mirrors
     save_link_electric_fields' path construction so the two never drift
@@ -467,10 +472,10 @@ def link_electric_fields_exist(ten_file, shape, Lx, Ly, bound_state, R, g, preci
         return False
     grp_path = _ef_links_grp_path(shape, Lx, Ly, bound_state, R, g, precision, chi, chargesx, chargesy)
     with _open_h5(ten_file, "r") as f:
-        return f"{grp_path}/ef_links" in f
+        return f"{grp_path}/{name}" in f
 
 
-def load_link_electric_fields(ten_file, shape, Lx, Ly, bound_state, R, g, precision, chi, chargesx=None, chargesy=None):
+def load_link_electric_fields(ten_file, shape, Lx, Ly, bound_state, R, g, precision, chi, chargesx=None, chargesy=None, name="ef_links"):
     """Load cached link electric-field values, in the same format
     link_electric_fields(engine, None, ...) returns ("neighbor" is always
     None here, since that field only carries meaning relative to a
@@ -479,7 +484,7 @@ def load_link_electric_fields(ten_file, shape, Lx, Ly, bound_state, R, g, precis
     grp_path = _ef_links_grp_path(shape, Lx, Ly, bound_state, R, g, precision, chi, chargesx, chargesy)
 
     with _open_h5(ten_file, "r") as f:
-        sub = f[f"{grp_path}/ef_links"]
+        sub = f[f"{grp_path}/{name}"]
         ijd = sub["ijd"][:]
         p_left = sub["p_left"][:]
         p_right = sub["p_right"][:]

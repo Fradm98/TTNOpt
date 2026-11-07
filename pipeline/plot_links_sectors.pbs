@@ -15,7 +15,12 @@
 #   qsub -l select=1:ncpus=4:mem=70gb:host=node07 pipeline/plot_links_sectors.pbs
 #
 # mem: 70gb is an estimate, not measured at chi=81 -- check it in qwatch.
-# Results are cached, so a rerun after a walltime cut skips finished points.
+# Link values are saved as they are computed, so a rerun after a walltime
+# cut resumes where it stopped. Progress (time per link) is in the log.
+#
+# Smaller chi only (about 7x cheaper than chi=81; the largest saved one is used):
+#
+#   qsub -v "CHIS=50 27 9" pipeline/plot_links_sectors.pbs
 
 cd $PBS_O_WORKDIR
 
@@ -28,4 +33,4 @@ export MPLBACKEND=Agg
 
 mkdir -p ../5_Z3/logs
 
-"$PYTHON" -u -m pipeline.plot_links_sectors > ../5_Z3/logs/plot_links_sectors.log 2>&1
+"$PYTHON" -u -m pipeline.plot_links_sectors ${CHIS:+--chis $CHIS} >> ../5_Z3/logs/plot_links_sectors.log 2>&1

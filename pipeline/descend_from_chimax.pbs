@@ -41,8 +41,18 @@
 # and not measured for this descent -- check the real peak in qwatch.
 #
 # walltime: a Mac-log chi=50 sweep took 0.5h on average, 1.5h at most, and
-# descents usually converged in under 10 sweeps. A descent has no resume: if
-# one is cut, it restarts from chi=81, so use -q long -l walltime=<h> instead.
+# descents usually converged in under 10 sweeps.
+#
+# Resuming a cut descent: the first descend chi (50) is saved after every
+# sweep, so a descent cut during the chi=50 stage restarts from that tensor,
+# not from chi=81, with a fresh sweep budget for chi=50 (each stage gets one):
+#
+#   qsub -o pbs_descend_resume_g-0.900.log \
+#       -v "G=-0.900,BOUND_STATE=baryon,CHARGESX=-1 -2 3,CHARGESY=2 7 3,SOURCE_CHI=50,DESCEND_CHIS=50 27 9" \
+#       pipeline/descend_from_chimax.pbs
+#
+# Only the chi=50 stage has this: a cut during chi=27 or chi=9 resumes from
+# chi=50's end-of-stage tensor (SOURCE_CHI=50,DESCEND_CHIS=27 9,SWEEPS_DESCEND=20 10).
 
 cd $PBS_O_WORKDIR
 
@@ -56,9 +66,9 @@ DRIVE_PATH="/home/fradm/projects/5_Z3"
 LX=5
 LY=9
 SHAPE=hexagon
-SOURCE_CHI=81
-DESCEND_CHIS="50 27 9"
-SWEEPS_DESCEND="25 20 10"    # same tapered budget as the production batches
+SOURCE_CHI=${SOURCE_CHI:-81}
+DESCEND_CHIS="${DESCEND_CHIS:-50 27 9}"
+SWEEPS_DESCEND="${SWEEPS_DESCEND:-25 20 10}"    # same tapered budget as the production batches
 ENERGY_CONVERGENCE_THRESHOLD=1e-10
 ENTANGLEMENT_CONVERGENCE_THRESHOLD=1e-8   # matches g_sweep_presto_batch_generator.sh
 

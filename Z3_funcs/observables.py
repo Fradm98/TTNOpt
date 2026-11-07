@@ -217,7 +217,7 @@ def load_engine_from_tensor(ten_file, Lx, Ly, shape, chi, g, bound_state=None, R
     return engine
 
 
-def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram"):
+def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram", done=None, on_link=None):
     """<V.v> electric-field link values, matching Hamiltonian.py's
     z3-model convention exactly (see ttnopt/src/Hamiltonian.py's "z3"
     branch): V is applied at the link's left-slot plaquette (label_links'
@@ -229,6 +229,11 @@ def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram")
         plaquette. If None, compute every link in the lattice (checks
         every (i,j,dir) entry of label_links, i.e. every site pair (i,j)
         that label_links reports as an existing direct-lattice link).
+
+    done : dict of links already computed (same format as the return
+        value); those links are kept and not recomputed.
+    on_link : optional callback(key, results, n_total), called after each
+        newly computed link with everything computed so far.
 
     engine must already hold a valid, loaded state (e.g. from
     load_engine_from_tensor) -- this mutates engine.psi's canonical
@@ -252,9 +257,13 @@ def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram")
     from Z3_funcs.lattice_plaquettes import label_links
 
     link_plaquettes, _ = label_links(Lx, Ly, shape)
-    results = {}
+    results = dict(done or {})
+    n_total = sum(1 for p_left, p_right in link_plaquettes.values()
+                  if plaquette_label is None or plaquette_label in (p_left, p_right))
     for key, (p_left, p_right) in link_plaquettes.items():
         if plaquette_label is not None and plaquette_label not in (p_left, p_right):
+            continue
+        if key in results:
             continue
         if p_left is not None and p_right is not None:
             value = engine.expval_general(p_left, "V", p_right, "v")
@@ -275,6 +284,8 @@ def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram")
             "p_left": p_left, "p_right": p_right,
             "neighbor": neighbor, "value": value, "kind": kind,
         }
+        if on_link is not None:
+            on_link(key, results, n_total)
     return results
 
 
@@ -291,6 +302,9 @@ def get_lattice_electric_fields(ten_file, Lx, Ly, shape, chi, g, bound_state=Non
     Set force_recompute=True to ignore an existing cache and recompute
     (e.g. the checkpoint at this g/chi was re-run/overwritten since the
     cache was last written).
+
+    Links are saved as they are computed ("ef_links_partial"), so a run cut
+    by the walltime resumes where it stopped; each link's time is printed.
     """
     from Z3_funcs.hdf5_manager import (
         link_electric_fields_exist, load_link_electric_fields,
@@ -306,12 +320,34 @@ def get_lattice_electric_fields(ten_file, Lx, Ly, shape, chi, g, bound_state=Non
             chargesx=chargesx, chargesy=chargesy,
         )
 
+    import time
+
+    cache_args = (ten_file, shape, Lx, Ly, bound_state, R, g, precision, chi)
+    done = {}
+    if not force_recompute and link_electric_fields_exist(
+        *cache_args, chargesx=chargesx, chargesy=chargesy, name="ef_links_partial",
+    ):
+        done = load_link_electric_fields(
+            *cache_args, chargesx=chargesx, chargesy=chargesy, name="ef_links_partial",
+        )
+        print(f"    resuming link fields: {len(done)} links already computed", flush=True)
+
     engine = load_engine_from_tensor(
         ten_file, Lx, Ly, shape, chi, g,
         bound_state=bound_state, R=R, precision=precision,
         chargesx=chargesx, chargesy=chargesy,
     )
-    links = link_electric_fields(engine, None, Lx, Ly, shape)
+    t_last = [time.time()]
+
+    def save_partial(key, results, n_total):
+        save_link_electric_fields(
+            *cache_args, results, chargesx=chargesx, chargesy=chargesy, name="ef_links_partial",
+        )
+        now = time.time()
+        print(f"    link {len(results)}/{n_total} {key}: {now - t_last[0]:.0f}s", flush=True)
+        t_last[0] = now
+
+    links = link_electric_fields(engine, None, Lx, Ly, shape, done=done, on_link=save_partial)
     save_link_electric_fields(
         ten_file, shape, Lx, Ly, bound_state, R, g, precision, chi, links,
         chargesx=chargesx, chargesy=chargesy,
