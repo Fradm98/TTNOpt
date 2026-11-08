@@ -89,7 +89,9 @@ if [ -n "$BOUND_STATE" ]; then
 fi
 
 mkdir -p ../5_Z3/logs
-log="../5_Z3/logs/descend_from_chi${SOURCE_CHI}_${TAG}_g${G}.log"
+# target chis in the name, so a chi=81 basic.csv job and a 81 -> 50 27 9
+# descent of the same point can run side by side without sharing a log
+log="../5_Z3/logs/descend_from_chi${SOURCE_CHI}_to${DESCEND_CHIS// /-}_${TAG}_g${G}.log"
 echo "g=$G: chi=$SOURCE_CHI -> $DESCEND_CHIS on $(hostname) at $(date), log: $log"
 
 "$PYTHON" -u -m pipeline.g_descend_existing \
