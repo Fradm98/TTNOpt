@@ -21,16 +21,20 @@
 # Smaller chi only (about 7x cheaper than chi=81; the largest saved one is used):
 #
 #   qsub -v "CHIS=50 27 9" pipeline/plot_links_sectors.pbs
+#
+# Only some g-points (default 0.1 0.7 1.5), e.g. while 0.7 is still descending:
+#
+#   qsub -v "CHIS=50 27 9,G=0.1 1.5" pipeline/plot_links_sectors.pbs
 
 cd $PBS_O_WORKDIR
 
 PYTHON="$HOME/.conda/envs/ttn/bin/python"
 
-export OMP_NUM_THREADS=4
-export MKL_NUM_THREADS=4
-export OPENBLAS_NUM_THREADS=4
+export OMP_NUM_THREADS=${NCPUS:-4}
+export MKL_NUM_THREADS=${NCPUS:-4}
+export OPENBLAS_NUM_THREADS=${NCPUS:-4}
 export MPLBACKEND=Agg
 
 mkdir -p ../5_Z3/logs
 
-"$PYTHON" -u -m pipeline.plot_links_sectors ${CHIS:+--chis $CHIS} >> ../5_Z3/logs/plot_links_sectors.log 2>&1
+"$PYTHON" -u -m pipeline.plot_links_sectors ${CHIS:+--chis $CHIS} ${G:+--g $G} >> ../5_Z3/logs/plot_links_sectors.log 2>&1

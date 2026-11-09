@@ -24,7 +24,7 @@ from Z3_funcs.visualize_plaquettes import plot_lattice_links
 
 DEVICE = "presto"
 LX, LY, SHAPE, PRECISION = 5, 9, "hexagon", 3
-G_VALUES = (-0.1, -0.7, -1.5)
+G_VALUES = (-0.1, -0.7, -1.5)  # g_sweep stores g negated
 CHIS = (81, 50, 27, 9)  # largest first
 COLOR_BY = ("real", "arg")
 CONFIGS = [
@@ -39,9 +39,13 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--chis", type=int, nargs="+", default=list(CHIS),
                    help="chis to try, largest first (default: %(default)s)")
-    chis = sorted(p.parse_args().chis, reverse=True)
+    p.add_argument("--g", type=float, nargs="+", default=None,
+                   help="g-points to plot, sign ignored (default: 0.1 0.7 1.5)")
+    args = p.parse_args()
+    chis = sorted(args.chis, reverse=True)
+    g_values = G_VALUES if args.g is None else tuple(-abs(g) for g in args.g)
     ten_file = f"{drive_path_for_device(DEVICE)}/tensors.hdf5"
-    for g in G_VALUES:
+    for g in g_values:
         for name, bound_state, R, xs, ys in CONFIGS:
             try:
                 chi = next((c for c in chis if tensor_exists(
