@@ -7,7 +7,7 @@
 #PBS -o pbs_plot_links_sectors.log
 
 # Link-field plots for vacuum and both baryons (pipeline/plot_links_sectors.py).
-# PDFs go to 5_Z3/figures, progress to 5_Z3/logs/plot_links_sectors.log.
+# PDFs go to 5_Z3/figures, progress to 5_Z3/logs/plot_links_sectors[_g<G>].log.
 #
 # Pick a node with real free memory: pbsnodes shows requested memory, not use.
 # Passing -l select on qsub overrides the line above:
@@ -37,4 +37,7 @@ export MPLBACKEND=Agg
 
 mkdir -p ../5_Z3/logs
 
-"$PYTHON" -u -m pipeline.plot_links_sectors ${CHIS:+--chis $CHIS} ${G:+--g $G} >> ../5_Z3/logs/plot_links_sectors.log 2>&1
+# one log per G, so jobs for different g-points can run side by side
+log="../5_Z3/logs/plot_links_sectors${G:+_g${G// /_}}.log"
+
+"$PYTHON" -u -m pipeline.plot_links_sectors ${CHIS:+--chis $CHIS} ${G:+--g $G} >> "$log" 2>&1
