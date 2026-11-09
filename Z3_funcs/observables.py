@@ -217,7 +217,106 @@ def load_engine_from_tensor(ten_file, Lx, Ly, shape, chi, g, bound_state=None, R
     return engine
 
 
-def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram", done=None, on_link=None):
+class TreeExpval:
+    """Expectation values of products of one-site operators on a TTN in
+    canonical form, without moving the canonical center.
+
+    Every tensor away from the center is an isometry towards it, so a
+    subtree with no operator in it contracts to the identity. An operator
+    is therefore carried up from its site only along its own branch, and
+    the two branches meet at their common ancestor or at the center. Cost
+    per value: (tree depth) x chi^3, plus chi^4 at the two central tensors.
+
+    Same contraction convention as PhysicsEngine (_set_edge_spin,
+    expval_twosite): the operator's first index goes with the state, the
+    second with its conjugate, and the value is divided by <psi|psi>.
+
+    psi is read only, never modified. Single-site operators carried up a
+    branch are cached, since every link of a plaquette reuses them.
+    """
+
+    def __init__(self, psi, spin_size):
+        from ttnopt.src.Observable import bare_spin_operator
+
+        self.psi = psi
+        self.center = psi.canonical_center_edge_id
+        self.central = psi.central_tensor_ids()
+        if len(self.central) != 2:
+            raise ValueError(f"expected 2 central tensors, got {self.central}")
+        self.below = {}  # internal edge -> tensor under it (center excluded)
+        self.parent_tensor = {}  # edge -> tensor that has it as a child
+        for t, (c0, c1, p) in enumerate(psi.edges):
+            if p != self.center:
+                self.below[p] = t
+            self.parent_tensor[c0] = t
+            self.parent_tensor[c1] = t
+        self.sites_under = {}
+        for e in self.parent_tensor:
+            self._sites(e)
+        self.bare = {}
+        for site, size in spin_size.items():
+            V = bare_spin_operator("V", size)
+            self.bare[site] = {"V": V, "v": V.conj().T}
+        self._cache = {}
+        self._norm2 = None
+
+    def _sites(self, e):
+        if e not in self.sites_under:
+            t = self.below.get(e)
+            if t is None:
+                self.sites_under[e] = frozenset([e])
+            else:
+                c0, c1, _ = self.psi.edges[t]
+                self.sites_under[e] = self._sites(c0) | self._sites(c1)
+        return self.sites_under[e]
+
+    @staticmethod
+    def _through(T, R0, R1):
+        """Carry child operators R0 (leg 0) and R1 (leg 1) through T to its
+        parent leg; None stands for the identity."""
+        if R0 is None and R1 is None:
+            return np.einsum("ika,ikb->ab", T, T.conj())
+        if R1 is None:
+            return np.einsum("ika,ij,jkb->ab", T, R0, T.conj(), optimize=True)
+        if R0 is None:
+            return np.einsum("ika,kl,ilb->ab", T, R1, T.conj(), optimize=True)
+        return np.einsum("ika,ij,kl,jlb->ab", T, R0, R1, T.conj(), optimize=True)
+
+    def _up(self, e, ops):
+        """Operator on edge e from ops = {site: name} under it, or None if
+        no operator is under e (identity, by isometry)."""
+        here = {s: o for s, o in ops.items() if s in self.sites_under[e]}
+        if not here:
+            return None
+        key = (e, tuple(sorted(here.items())))
+        if key in self._cache:
+            return self._cache[key]
+        t = self.below.get(e)
+        if t is None:
+            R = self.bare[e][here[e]]
+        else:
+            c0, c1, _ = self.psi.edges[t]
+            R = self._through(self.psi.tensors[t], self._up(c0, here), self._up(c1, here))
+        if len(here) == 1:  # products of two are rarely reused
+            self._cache[key] = R
+        return R
+
+    def _center_value(self, ops):
+        sides = []
+        for t in self.central:
+            c0, c1, _ = self.psi.edges[t]
+            sides.append(self._through(self.psi.tensors[t], self._up(c0, ops), self._up(c1, ops)))
+        G = self.psi.gauge_tensor
+        return np.einsum("xy,xa,yb,ab->", G, sides[0], sides[1], G.conj(), optimize=True)
+
+    def expval(self, ops):
+        """<prod_site op(site)> / <psi|psi> for ops = {site: "V" or "v"}."""
+        if self._norm2 is None:
+            self._norm2 = np.real(self._center_value({}))
+        return self._center_value(ops) / self._norm2
+
+
+def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram", done=None, on_link=None, fast=True):
     """<V.v> electric-field link values, matching Hamiltonian.py's
     z3-model convention exactly (see ttnopt/src/Hamiltonian.py's "z3"
     branch): V is applied at the link's left-slot plaquette (label_links'
@@ -236,8 +335,13 @@ def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram",
         newly computed link with everything computed so far.
 
     engine must already hold a valid, loaded state (e.g. from
-    load_engine_from_tensor) -- this mutates engine.psi's canonical
-    center in place via expval_general/move_canonical_center.
+    load_engine_from_tensor).
+
+    fast : True (default) evaluates every link with TreeExpval on
+        engine.psi, leaving the state untouched. False uses the old
+        engine.expval_general path, which moves the canonical center and
+        rebuilds every renormalized operator for each link (kept for
+        cross-checks).
 
     Returns
     -------
@@ -260,24 +364,32 @@ def link_electric_fields(engine, plaquette_label, Lx, Ly, shape="parallelogram",
     results = dict(done or {})
     n_total = sum(1 for p_left, p_right in link_plaquettes.values()
                   if plaquette_label is None or plaquette_label in (p_left, p_right))
+    if fast:
+        tree = TreeExpval(engine.psi, engine.hamiltonian.spin_size)
+
+        def expval(p_i, op_i, p_j=None, op_j=None):
+            ops = {p_i: op_i} if p_j is None else {p_i: op_i, p_j: op_j}
+            return complex(tree.expval(ops))
+    else:
+        expval = engine.expval_general
     for key, (p_left, p_right) in link_plaquettes.items():
         if plaquette_label is not None and plaquette_label not in (p_left, p_right):
             continue
         if key in results:
             continue
         if p_left is not None and p_right is not None:
-            value = engine.expval_general(p_left, "V", p_right, "v")
+            value = expval(p_left, "V", p_right, "v")
             if plaquette_label is None:
                 neighbor = None
             else:
                 neighbor = p_right if plaquette_label == p_left else p_left
             kind = "Vv"
         elif p_left is not None:
-            value = engine.expval_general(p_left, "V")
+            value = expval(p_left, "V")
             neighbor = None
             kind = "V"
         else:
-            value = engine.expval_general(p_right, "v")
+            value = expval(p_right, "v")
             neighbor = None
             kind = "v"
         results[key] = {
@@ -294,10 +406,11 @@ def get_lattice_electric_fields(ten_file, Lx, Ly, shape, chi, g, bound_state=Non
     link_electric_fields(engine, plaquette_label=None, ...)), cached
     inside ten_file next to the tensor checkpoint it's computed from.
 
-    Computing every link is expensive -- each one may move the canonical
-    center and re-prime the whole tree -- so once computed for a given
-    (config, g, chi) it's saved and reused on later calls instead of
-    recomputed from scratch every time.
+    Once computed for a given (config, g, chi) the values are saved and
+    reused on later calls. With the TreeExpval path each link costs about
+    (tree depth) x chi^3, so loading the engine dominates; the old path
+    (fast=False in link_electric_fields) moved the canonical center and
+    rebuilt every renormalized operator for each link.
 
     Set force_recompute=True to ignore an existing cache and recompute
     (e.g. the checkpoint at this g/chi was re-run/overwritten since the
