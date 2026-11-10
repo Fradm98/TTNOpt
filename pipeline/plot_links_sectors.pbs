@@ -25,6 +25,11 @@
 # Only some g-points (default 0.1 0.7 1.5), e.g. while 0.7 is still descending:
 #
 #   qsub -v "CHIS=50 27 9,G=0.1 1.5" pipeline/plot_links_sectors.pbs
+#
+# Only some colour modes (default real arg flux net); link values already
+# cached in tensors.hdf5 are reused, so redrawing is quick:
+#
+#   qsub -v "G=0.9 1.5,COLOR_BY=flux net" pipeline/plot_links_sectors.pbs
 
 cd $PBS_O_WORKDIR
 
@@ -40,4 +45,4 @@ mkdir -p ../5_Z3/logs
 # one log per G, so jobs for different g-points can run side by side
 log="../5_Z3/logs/plot_links_sectors${G:+_g${G// /_}}.log"
 
-"$PYTHON" -u -m pipeline.plot_links_sectors ${CHIS:+--chis $CHIS} ${G:+--g $G} >> "$log" 2>&1
+"$PYTHON" -u -m pipeline.plot_links_sectors ${CHIS:+--chis $CHIS} ${G:+--g $G} ${COLOR_BY:+--color-by $COLOR_BY} >> "$log" 2>&1

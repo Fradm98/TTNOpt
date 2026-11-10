@@ -1,7 +1,7 @@
 """
 pipeline/plot_links_sectors.py
 ---------------------------------
-Link-field plots (color_by real and arg) for the 5x9 hexagon vacuum, on-axis
+Link-field plots (color_by real, arg, flux and net) for the 5x9 hexagon vacuum, on-axis
 R=2 baryon and off-axis custom1 baryon, each at the largest chi with a saved
 tensor. Points without a tensor are skipped; a failing point doesn't stop the
 others.
@@ -26,7 +26,7 @@ DEVICE = "presto"
 LX, LY, SHAPE, PRECISION = 5, 9, "hexagon", 3
 G_VALUES = (-0.1, -0.7, -1.5)  # g_sweep stores g negated
 CHIS = (81, 50, 27, 9)  # largest first
-COLOR_BY = ("real", "arg")
+COLOR_BY = ("real", "arg", "flux", "net")
 CONFIGS = [
     # name, bound_state, R, chargesx, chargesy
     ("vacuum", None, None, None, None),
@@ -41,6 +41,8 @@ def main():
                    help="chis to try, largest first (default: %(default)s)")
     p.add_argument("--g", type=float, nargs="+", default=None,
                    help="g-points to plot, sign ignored (default: 0.1 0.7 1.5)")
+    p.add_argument("--color-by", nargs="+", default=list(COLOR_BY), choices=["abs", *COLOR_BY],
+                   help="colour modes to draw (default: %(default)s)")
     args = p.parse_args()
     chis = sorted(args.chis, reverse=True)
     g_values = G_VALUES if args.g is None else tuple(-abs(g) for g in args.g)
@@ -54,7 +56,7 @@ def main():
                 if chi is None:
                     print(f"SKIP {name} g={g}: no tensor", flush=True)
                     continue
-                for color_by in COLOR_BY:
+                for color_by in args.color_by:
                     print(f"START {name} g={g} chi={chi} {color_by}", flush=True)
                     plot_lattice_links(
                         LX, LY, SHAPE, bound_state, R, g, chi, DEVICE,

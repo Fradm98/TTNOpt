@@ -101,16 +101,51 @@ def _link_color_mapper(color_by="abs", cmap_name=None, min_val=None, max_val=Non
         label = r"$\arg(coeff_{link}\langle V_{link}\rangle)$ (rad)"
     elif color_by == "real":
         cmap_name = cmap_name or "RdBu_r"
-        _min = -1.0 if min_val is None else min_val
+        _min = -0.5 if min_val is None else min_val  # Re w >= -1/2, see flux_content
         _max = 1.0 if max_val is None else max_val
         norm = mcolors.Normalize(vmin=_min, vmax=_max, clip=True)
         metric_fn = lambda v: v.real
         label = r"$\mathrm{Re}(coeff_{link}\langle V_{link}\rangle)$"
+    elif color_by == "flux":
+        # RdBu on n in [0,1] is the "real" map (RdBu_r) on Re w in [-1/2, 1]:
+        # dark red = vacuum, dark blue = one full flux quantum
+        cmap_name = cmap_name or "RdBu"
+        _min = 0.0 if min_val is None else min_val
+        _max = 1.0 if max_val is None else max_val
+        norm = mcolors.Normalize(vmin=_min, vmax=_max, clip=True)
+        metric_fn = lambda v: flux_content(v)[0]
+        label = r"flux $n = p_{+} + p_{-}$"
+    elif color_by == "net":
+        cmap_name = cmap_name or "berlin"
+        _min = -1.0 if min_val is None else min_val
+        _max = 1.0 if max_val is None else max_val
+        norm = mcolors.Normalize(vmin=_min, vmax=_max, clip=True)
+        metric_fn = lambda v: flux_content(v)[1]
+        label = r"net flux $p_{+} - p_{-}$"
     else:
-        raise ValueError(f"color_by must be 'abs', 'arg', or 'real', got {color_by!r}")
+        raise ValueError(f"color_by must be 'abs', 'arg', 'real', 'flux' or 'net', got {color_by!r}")
     cmap = mpl.colormaps.get_cmap(cmap_name)
     mapper = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
     return mapper, metric_fn, label, cmap, norm
+
+
+def flux_content(w):
+    """Flux probabilities on a link from w = coeff_link * <V_link>.
+
+    coeff_link * V_link has eigenvalues 1, omega, omega^2 (omega =
+    exp(2 pi i / 3)): no flux, one quantum along the link, one quantum
+    against it. With p0, p+, p- their probabilities,
+    w = p0 + p+ omega + p- omega^2, so w lies in the triangle 1, omega,
+    omega^2 (in particular Re w >= -1/2) and, using p0 + p+ + p- = 1,
+
+        n   = p+ + p-  = 2 (1 - Re w) / 3      in [0, 1]
+        net = p+ - p-  = 2 Im w / sqrt(3)      in [-1, 1]
+
+    n is the probability the link carries flux (0 vacuum, 1 one full
+    quantum); the sign of net is the flux direction along the link's
+    orientation (link_site_endpoints: first site -> second site).
+    """
+    return 2.0 * (1.0 - np.real(w)) / 3.0, 2.0 * np.imag(w) / np.sqrt(3.0)
 
 
 def link_site_endpoints(i, j, d):
@@ -583,6 +618,11 @@ def plot_lattice_links(
         g=-10: every link sits at |value|=1, so "abs" looks uniformly
         bright even directly on the string -- "arg" or "real" is what
         actually reveals it there).
+        "flux": flux occupation n = p+ + p- in [0,1] (0 = vacuum, 1 = one
+        full flux quantum), from Re(w). "net": net flux p+ - p- in [-1,1],
+        from Im(w), measured along 0, 120 and 240 degrees (d=0, d=2 as in
+        link_site_endpoints, d=1 reversed), so all three strings of a
+        baryon show the same sign. See flux_content.
     max_val, min_val : colour-scale bounds, defaulted per color_by by
         _link_color_mapper.
 
@@ -631,6 +671,11 @@ def plot_lattice_links(
         all_sites.update([p0, p1])
         pos0, pos1 = site_pos(*p0, scale), site_pos(*p1, scale)
         metric_value = coeffs[(i, j, d)] * info["value"]
+        if color_by == "net" and d == 1:
+            # measure net flux along 0, 120, 240 degrees (d=0, d=2, reversed
+            # d=1): a quark's three outgoing directions, so the strings of a
+            # baryon all carry the same sign. Reversing a link conjugates w.
+            metric_value = np.conj(metric_value)
         color = mapper.to_rgba(metric_fn(metric_value))
         # shrink each segment in from both ends so thick links converging
         # on a shared vertex leave a visible gap instead of piling into a
